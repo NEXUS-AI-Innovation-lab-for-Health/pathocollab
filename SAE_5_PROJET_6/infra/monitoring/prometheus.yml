@@ -1,0 +1,54 @@
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+  external_labels:
+    cluster: 'pixtral-dev'
+    environment: 'development'
+
+scrape_configs:
+  - job_name: 'prometheus'
+    static_configs:
+      - targets: ['localhost:9090']
+
+  - job_name: 'auth-service'
+    metrics_path: '/metrics'
+    static_configs:
+      - targets: ['host.docker.internal:8001']
+        labels:
+          service: 'auth-service'
+
+  - job_name: 'cases-service'
+    metrics_path: '/metrics'
+    static_configs:
+      - targets: ['host.docker.internal:8002']
+        labels:
+          service: 'cases-service'
+
+  - job_name: 'workflow-service'
+    metrics_path: '/metrics'
+    static_configs:
+      - targets: ['host.docker.internal:8003']
+        labels:
+          service: 'workflow-service'
+
+  - job_name: 'images-service'
+    metrics_path: '/metrics'
+    static_configs:
+      - targets: ['host.docker.internal:8004']
+        labels:
+          service: 'images-service'
+
+  - job_name: 'reports-service'
+    metrics_path: '/metrics'
+    static_configs:
+      - targets: ['host.docker.internal:8005']
+        labels:
+          service: 'reports-service'
+
+  - job_name: 'postgres'
+    static_configs:
+      - targets: ['postgres:5432']
+
+  - job_name: 'redis'
+    static_configs:
+      - targets: ['redis:6379']

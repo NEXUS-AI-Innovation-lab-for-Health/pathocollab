@@ -1,0 +1,252 @@
+version: '3.9'
+
+services:
+  # === INFRASTRUCTURE ===
+  postgres:
+    image: postgres:16-alpine
+    container_name: pixtral-postgres-prod
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-pixtral_user}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-pixtral_pass}
+      POSTGRES_MULTIPLE_DATABASES: auth_db,cases_db,workflow_db,images_db,reports_db
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres-data-prod:/var/lib/postgresql/data
+      - ./postgres/init-multiple-databases.sh:/docker-entrypoint-initdb.d/init-multiple-databases.sh
+    restart: unless-stopped
+    networks:
+      - pixtral-network
+
+  redis:
+    image: redis:7-alpine
+    container_name: pixtral-redis-prod
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis-data-prod:/data
+    restart: unless-stopped
+    networks:
+      - pixtral-network
+
+  minio:
+    image: minio/minio:latest
+    container_name: pixtral-minio-prod
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-minioadmin}
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    volumes:
+      - minio-data-prod:/data
+    restart: unless-stopped
+    networks:
+      - pixtral-network
+
+  redpanda:
+    image: docker.redpanda.com/redpandadata/redpanda:v23.3.3
+    container_name: pixtral-redpanda-prod
+    command:
+      - redpanda
+      - start
+      - --smp
+      - "1"
+      - --reserve-memory
+      - 0M
+      - --overprovisioned
+      - --node-id
+      - "0"
+      - --kafka-addr
+      - PLAINTEXT://0.0.0.0:29092,OUTSIDE://0.0.0.0:9092
+      - --advertise-kafka-addr
+      - PLAINTEXT://redpanda:29092,OUTSIDE://localhost:9092
+    ports:
+      - "9092:9092"
+    volumes:
+      - redpanda-data-prod:/var/lib/redpanda/data
+    restart: unless-stopped
+    networks:
+      - pixtral-network
+
+  qdrant:
+    image: qdrant/qdrant:latest
+    container_name: pixtral-qdrant-prod
+    ports:
+      - "6333:6333"
+    volumes:
+      - qdrant-data-prod:/qdrant/storage
+    restart: unless-stopped
+    networks:
+      - pixtral-network
+
+  n8n:
+    image: n8nio/n8n:latest
+    container_name: pixtral-n8n-prod
+    environment:
+      - N8N_BASIC_AUTH_ACTIVE=true
+      - N8N_BASIC_AUTH_USER=${N8N_USER:-admin}
+      - N8N_BASIC_AUTH_PASSWORD=${N8N_PASSWORD:-pixtral2025}
+    ports:
+      - "5678:5678"
+    volumes:
+      - n8n-data-prod:/home/node/.n8n
+    restart: unless-stopped
+    networks:
+      - pixtral-network
+
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: pixtral-prometheus-prod
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml
+      - prometheus-data-prod:/prometheus
+    restart: unless-stopped
+    networks:
+      - pixtral-network
+
+  grafana:
+    image: grafana/grafana:latest
+    container_name: pixtral-grafana-prod
+    environment:
+      - GF_SECURITY_ADMIN_USER=${GRAFANA_USER:-admin}
+      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_PASSWORD:-pixtral2025}
+    ports:
+      - "3001:3000"
+    volumes:
+      - grafana-data-prod:/var/lib/grafana
+      - ./monitoring/grafana/dashboards:/etc/grafana/provisioning/dashboards
+      - ./monitoring/grafana/datasources:/etc/grafana/provisioning/datasources
+    depends_on:
+      - prometheus
+    restart: unless-stopped
+    networks:
+      - pixtral-network
+
+  # === BACKEND SERVICES ===
+  auth-service:
+    build:
+      context: ../apps/auth-service
+      dockerfile: Dockerfile
+    container_name: pixtral-auth-service
+    environment:
+      - DATABASE_URL=${AUTH_DB_URL}
+      - REDIS_URL=redis://redis:6379/0
+      - JWT_SECRET_KEY=${JWT_SECRET_KEY}
+    ports:
+      - "8001:8001"
+    depends_on:
+      - postgres
+      - redis
+    restart: unless-stopped
+    networks:
+      - pixtral-network
+
+  cases-service:
+    build:
+      context: ../apps/cases-service
+      dockerfile: Dockerfile
+    container_name: pixtral-cases-service
+    environment:
+      - DATABASE_URL=${CASES_DB_URL}
+      - MINIO_ENDPOINT=minio:9000
+      - AUTH_SERVICE_URL=http://auth-service:8001
+    ports:
+      - "8002:8002"
+    depends_on:
+      - postgres
+      - minio
+    restart: unless-stopped
+    networks:
+      - pixtral-network
+
+  workflow-service:
+    build:
+      context: ../apps/workflow-service
+      dockerfile: Dockerfile
+    container_name: pixtral-workflow-service
+    environment:
+      - DATABASE_URL=${WORKFLOW_DB_URL}
+      - REDIS_URL=redis://redis:6379/1
+      - KAFKA_BOOTSTRAP_SERVERS=redpanda:29092
+      - EMERGENT_LLM_KEY=${EMERGENT_LLM_KEY}
+    ports:
+      - "8003:8003"
+    depends_on:
+      - postgres
+      - redis
+      - redpanda
+    restart: unless-stopped
+    networks:
+      - pixtral-network
+
+  images-service:
+    build:
+      context: ../apps/images-service
+      dockerfile: Dockerfile
+    container_name: pixtral-images-service
+    environment:
+      - DATABASE_URL=${IMAGES_DB_URL}
+      - MINIO_ENDPOINT=minio:9000
+    ports:
+      - "8004:8004"
+    depends_on:
+      - postgres
+      - minio
+    restart: unless-stopped
+    networks:
+      - pixtral-network
+
+  reports-service:
+    build:
+      context: ../apps/reports-service
+      dockerfile: Dockerfile
+    container_name: pixtral-reports-service
+    environment:
+      - DATABASE_URL=${REPORTS_DB_URL}
+      - QDRANT_URL=http://qdrant:6333
+      - EMERGENT_LLM_KEY=${EMERGENT_LLM_KEY}
+    ports:
+      - "8005:8005"
+    depends_on:
+      - postgres
+      - qdrant
+    restart: unless-stopped
+    networks:
+      - pixtral-network
+
+  # === FRONTEND ===
+  web:
+    build:
+      context: ../apps/web
+      dockerfile: Dockerfile
+    container_name: pixtral-web
+    environment:
+      - REACT_APP_BACKEND_URL=http://localhost:8001
+    ports:
+      - "3000:3000"
+    depends_on:
+      - auth-service
+    restart: unless-stopped
+    networks:
+      - pixtral-network
+
+volumes:
+  postgres-data-prod:
+  redis-data-prod:
+  minio-data-prod:
+  redpanda-data-prod:
+  qdrant-data-prod:
+  n8n-data-prod:
+  prometheus-data-prod:
+  grafana-data-prod:
+
+networks:
+  pixtral-network:
+    driver: bridge

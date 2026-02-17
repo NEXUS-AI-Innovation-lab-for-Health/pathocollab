@@ -1,0 +1,343 @@
+version: "3.9"
+
+services:
+  # PostgreSQL - 5 bases de données
+  postgres:
+    image: postgres:16-alpine
+    container_name: pixtral-postgres
+    environment:
+      POSTGRES_USER: pixtral_user
+      POSTGRES_PASSWORD: pixtral_pass
+      POSTGRES_MULTIPLE_DATABASES: auth_db,cases_db,workflow_db,images_db,reports_db
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      - ./postgres/init-multiple-databases.sh:/docker-entrypoint-initdb.d/init-multiple-databases.sh
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U pixtral_user"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - pixtral-network
+
+  # Redis - Cache & sessions + workflow memory
+  redis:
+    image: redis:7-alpine
+    container_name: pixtral-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+    networks:
+      - pixtral-network
+
+  # MinIO - Stockage d'images WSI
+  minio:
+    image: minio/minio:latest
+    container_name: pixtral-minio
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    volumes:
+      - minio-data:/data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 30s
+      timeout: 20s
+      retries: 3
+    networks:
+      - pixtral-network
+
+  # Création des buckets MinIO
+  minio-init:
+    image: minio/mc:latest
+    container_name: pixtral-minio-init
+    depends_on:
+      - minio
+    entrypoint: >
+      /bin/sh -c "
+      sleep 10;
+      /usr/bin/mc config host add myminio http://minio:9000 minioadmin minioadmin;
+      /usr/bin/mc mb myminio/pixtral-wsi-images --ignore-existing;
+      /usr/bin/mc mb myminio/pixtral-images --ignore-existing;
+      /usr/bin/mc anonymous set download myminio/pixtral-wsi-images;
+      /usr/bin/mc anonymous set download myminio/pixtral-images;
+      exit 0;
+      "
+    networks:
+      - pixtral-network
+
+  # Redpanda (Kafka-compatible) - Bus d'événements
+  redpanda:
+    image: docker.redpanda.com/redpandadata/redpanda:v23.3.3
+    container_name: pixtral-redpanda
+    command:
+      - redpanda
+      - start
+      - --smp
+      - "1"
+      - --reserve-memory
+      - 0M
+      - --overprovisioned
+      - --node-id
+      - "0"
+      - --kafka-addr
+      - PLAINTEXT://0.0.0.0:29092,OUTSIDE://0.0.0.0:9092
+      - --advertise-kafka-addr
+      - PLAINTEXT://redpanda:29092,OUTSIDE://localhost:9092
+    ports:
+      - "9092:9092"
+      - "9644:9644"
+    volumes:
+      - redpanda-data:/var/lib/redpanda/data
+    healthcheck:
+      test:
+        ["CMD-SHELL", "rpk cluster health | grep -E 'Healthy:.+true' || exit 1"]
+      interval: 15s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+    networks:
+      - pixtral-network
+
+  # Qdrant - Vector DB pour RAG
+  qdrant:
+    image: qdrant/qdrant:latest
+    container_name: pixtral-qdrant
+    ports:
+      - "6333:6333"
+      - "6334:6334"
+    volumes:
+      - qdrant-data:/qdrant/storage
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:6333/healthz"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - pixtral-network
+
+  # n8n - Workflow automation
+  n8n:
+    image: n8nio/n8n:latest
+    container_name: pixtral-n8n
+    environment:
+      - N8N_BASIC_AUTH_ACTIVE=true
+      - N8N_BASIC_AUTH_USER=admin
+      - N8N_BASIC_AUTH_PASSWORD=pixtral2025
+      - N8N_HOST=localhost
+      - N8N_PORT=5678
+      - N8N_PROTOCOL=http
+      - WEBHOOK_URL=http://localhost:5678/
+    ports:
+      - "5678:5678"
+    volumes:
+      - n8n-data:/home/node/.n8n
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:5678/healthz"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    networks:
+      - pixtral-network
+
+  # Prometheus - Métriques
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: pixtral-prometheus
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+      - "--storage.tsdb.path=/prometheus"
+      - "--web.console.libraries=/usr/share/prometheus/console_libraries"
+      - "--web.console.templates=/usr/share/prometheus/consoles"
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml
+      - prometheus-data:/prometheus
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:9090/-/healthy"]
+      interval: 15s
+      timeout: 10s
+      retries: 3
+    networks:
+      - pixtral-network
+
+  # Grafana - Dashboards
+  grafana:
+    image: grafana/grafana:latest
+    container_name: pixtral-grafana
+    environment:
+      - GF_SECURITY_ADMIN_USER=admin
+      - GF_SECURITY_ADMIN_PASSWORD=pixtral2025
+      - GF_USERS_ALLOW_SIGN_UP=false
+    ports:
+      - "3001:3000"
+    volumes:
+      - grafana-data:/var/lib/grafana
+      - ./monitoring/grafana/dashboards:/etc/grafana/provisioning/dashboards
+      - ./monitoring/grafana/datasources:/etc/grafana/provisioning/datasources
+    depends_on:
+      - prometheus
+    healthcheck:
+      test:
+        ["CMD", "wget", "--spider", "-q", "http://localhost:3000/api/health"]
+      interval: 15s
+      timeout: 10s
+      retries: 3
+    networks:
+      - pixtral-network
+
+  # Auth Service (Port 8001) - Service d'authentification
+  auth-service:
+    build:
+      context: ../apps/auth-service
+      dockerfile: Dockerfile
+    container_name: pixtral-auth-service
+    ports:
+      - "8001:8001"
+    environment:
+      DATABASE_URL: postgresql://pixtral_user:pixtral_pass@postgres:5432/auth_db
+      SECRET_KEY: your-secret-key-here
+      ALGORITHM: HS256
+      ACCESS_TOKEN_EXPIRE_MINUTES: 30
+    depends_on:
+      - postgres
+    networks:
+      - pixtral-network
+    volumes:
+      - ../apps/auth-service:/app
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8001/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  # Cases Service (Port 8002) - Gestion des cas cliniques
+  cases-service:
+    build:
+      context: ../apps/cases-service
+      dockerfile: Dockerfile
+    container_name: pixtral-cases-service
+    ports:
+      - "8002:8002"
+    environment:
+      DATABASE_URL: postgresql://pixtral_user:pixtral_pass@postgres:5432/cases_db
+      MINIO_ENDPOINT: minio:9000
+      MINIO_ACCESS_KEY: minioadmin
+      MINIO_SECRET_KEY: minioadmin
+    depends_on:
+      - postgres
+      - minio
+    networks:
+      - pixtral-network
+    volumes:
+      - ../apps/cases-service:/app
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8002/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  # Workflow Service (Port 8003) - Gestion des workflows collaboratifs
+  workflow-service:
+    build:
+      context: ../apps/workflow-service
+      dockerfile: Dockerfile
+    container_name: pixtral-workflow-service
+    ports:
+      - "8003:8003"
+    environment:
+      DATABASE_URL: postgresql://pixtral_user:pixtral_pass@postgres:5432/workflow_db
+      REDIS_URL: redis://redis:6379
+    depends_on:
+      - postgres
+      - redis
+    networks:
+      - pixtral-network
+    volumes:
+      - ../apps/workflow-service:/app
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8003/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  # Reports Service (Port 8005) - Gestion des rapports médicaux
+  reports-service:
+    build:
+      context: ../apps/reports-service
+      dockerfile: Dockerfile
+    container_name: pixtral-reports-service
+    ports:
+      - "8005:8005"
+    environment:
+      DATABASE_URL: postgresql://pixtral_user:pixtral_pass@postgres:5432/reports_db
+    depends_on:
+      - postgres
+    networks:
+      - pixtral-network
+    volumes:
+      - ../apps/reports-service:/app
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8005/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  # Images Service (Port 8004) - Gestion des images médicales
+  images-service:
+    build:
+      context: ../apps/images-service
+      dockerfile: Dockerfile
+    container_name: pixtral-images-service
+    ports:
+      - "8004:8004"
+    environment:
+      DATABASE_URL: postgresql://pixtral_user:pixtral_pass@postgres:5432/images_db
+      MINIO_ENDPOINT: minio:9000
+      MINIO_ACCESS_KEY: minioadmin
+      MINIO_SECRET_KEY: minioadmin
+      MINIO_BUCKET_NAME: pixtral-images
+    depends_on:
+      - postgres
+      - minio
+    networks:
+      - pixtral-network
+    volumes:
+      - ../apps/images-service:/app
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8004/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+volumes:
+  postgres-data:
+  redis-data:
+  minio-data:
+  redpanda-data:
+  qdrant-data:
+  n8n-data:
+  prometheus-data:
+  grafana-data:
+
+networks:
+  pixtral-network:
+    driver: bridge

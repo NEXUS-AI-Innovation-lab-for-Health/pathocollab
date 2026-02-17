@@ -1,0 +1,56 @@
+name: CI/CD - Deploy to VM
+
+on:
+  push:
+    branches:
+      - Base-Ci/CD     # déclenché sur les push de cette branche
+  workflow_dispatch:   # permet de lancer le workflow à la main depuis l'UI GitHub
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository (pour info)
+        uses: actions/checkout@v4
+
+      - name: Deploy to VM over SSH
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.VM_HOST }}
+          username: ${{ secrets.VM_USER }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          script: |
+            echo ">>> Début du déploiement sur la VM"
+
+            # Dossier du projet sur la VM (à adapter si différent)
+            PROJECT_DIR="$HOME/SAE_5_PROJET_6"
+
+            if [ ! -d "$PROJECT_DIR/.git" ]; then
+              echo ">>> Projet introuvable, clonage initial..."
+              git clone https://github.com/UltimateDPV4/SAE_5_PROJET_6.git "$PROJECT_DIR"
+            fi
+
+            cd "$PROJECT_DIR"
+
+            echo ">>> Récupération du dernier code..."
+            git fetch origin Base-Ci/CD
+            git checkout Base-Ci/CD
+            git reset --hard origin/Base-Ci/CD
+
+            echo ">>> Mise à jour des dépendances Python..."
+            chmod +x scripts/install_python_services.sh
+            ./scripts/install_python_services.sh
+
+            echo ">>> Démarrage / redémarrage de l'infrastructure Docker..."
+            cd "$PROJECT_DIR/infra"
+            docker compose -f docker-compose.dev.yml up -d
+            cd "$PROJECT_DIR"
+
+            echo ">>> Lancement des migrations et des services..."
+            chmod +x scripts/init-databases.sh
+            chmod +x scripts/start-all-services.sh
+            ./scripts/init-databases.sh
+            ./scripts/start-all-services.sh
+
+            echo ">>> Déploiement terminé."

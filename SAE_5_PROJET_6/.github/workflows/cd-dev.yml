@@ -1,0 +1,92 @@
+name: CD - Deploy to Dev
+
+on:
+  push:
+    branches: [develop]
+
+jobs:
+  deploy-dev:
+    name: Deploy to Development
+    runs-on: ubuntu-latest
+    environment:
+      name: development
+      url: https://dev.pixtral.app
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+      
+      - name: Login to registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      
+      - name: Build images
+        run: |
+          docker-compose -f infra/docker-compose.dev.yml build
+      
+      - name: Run database migrations
+        run: |
+          # Auth Service
+          docker run --rm --network host \
+            -e DATABASE_URL="${{ secrets.DEV_AUTH_DB_URL }}" \
+            ghcr.io/${{ github.repository }}/auth-service:develop \
+            alembic upgrade head
+          
+          # Cases Service
+          docker run --rm --network host \
+            -e DATABASE_URL="${{ secrets.DEV_CASES_DB_URL }}" \
+            ghcr.io/${{ github.repository }}/cases-service:develop \
+            alembic upgrade head
+          
+          # Workflow Service
+          docker run --rm --network host \
+            -e DATABASE_URL="${{ secrets.DEV_WORKFLOW_DB_URL }}" \
+            ghcr.io/${{ github.repository }}/workflow-service:develop \
+            alembic upgrade head
+          
+          # Images Service
+          docker run --rm --network host \
+            -e DATABASE_URL="${{ secrets.DEV_IMAGES_DB_URL }}" \
+            ghcr.io/${{ github.repository }}/images-service:develop \
+            alembic upgrade head
+          
+          # Reports Service
+          docker run --rm --network host \
+            -e DATABASE_URL="${{ secrets.DEV_REPORTS_DB_URL }}" \
+            ghcr.io/${{ github.repository }}/reports-service:develop \
+            alembic upgrade head
+      
+      - name: Deploy services
+        run: |
+          docker-compose -f infra/docker-compose.dev.yml up -d
+      
+      - name: Health checks
+        run: |
+          echo "Waiting for services to start..."
+          sleep 30
+          
+          services=("auth-service:8001" "cases-service:8002" "workflow-service:8003" "images-service:8004" "reports-service:8005")
+          
+          for service in "${services[@]}"; do
+            IFS=':' read -r name port <<< "$service"
+            echo "Checking $name on port $port..."
+            curl -f http://localhost:$port/health || exit 1
+            echo "$name is healthy"
+          done
+      
+      - name: Notify deployment
+        if: success()
+        run: |
+          echo "Deployment to dev successful!"
+      
+      - name: Rollback on failure
+        if: failure()
+        run: |
+          echo "Deployment failed, rolling back..."
+          docker-compose -f infra/docker-compose.dev.yml down
