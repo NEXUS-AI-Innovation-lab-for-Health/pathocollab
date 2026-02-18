@@ -26,7 +26,8 @@ import html2canvas from "html2canvas";
 import OpenSeadragonUrlViewer from "../components/OpenSeadragon/OpenSeadragonUrlViewer.tsx";
 
 const CASES_API = process.env.REACT_APP_BACKEND_URL || `${window.location.protocol}//${window.location.hostname}:8002`;
-const WORKFLOW_API = process.env.REACT_APP_BACKEND_URL || `${window.location.protocol}//${window.location.hostname}:8003`;
+const WORKFLOW_API = process.env.REACT_APP_WORKFLOW_URL || `${window.location.protocol}//${window.location.hostname}:8003`;
+const REPORTS_API = process.env.REACT_APP_REPORTS_URL || `${window.location.protocol}//${window.location.hostname}:8005`;
 
 const getStatusLabel = (status) => {
   const labels = {
@@ -124,14 +125,14 @@ const CaseDetail = () => {
     try {
       // Fetch case
       const caseResponse = await axios.get(
-        `http://localhost:8002/api/cases/${caseId}`,
+        `${CASES_API}/api/cases/${caseId}`,
       );
       setCase(caseResponse.data);
 
       // Fetch patient depuis la base de données
       try {
         const patientResponse = await axios.get(
-          `http://localhost:8002/api/patients/${caseResponse.data.patient_id}`,
+          `${CASES_API}/api/patients/${caseResponse.data.patient_id}`,
         );
         setPatient(patientResponse.data);
       } catch (err) {
@@ -141,7 +142,7 @@ const CaseDetail = () => {
       // Fetch workflow
       try {
         const workflowResponse = await axios.get(
-          `http://localhost:8003/api/workflows/case/${caseId}`,
+          `${WORKFLOW_API}/api/workflows/case/${caseId}`,
         );
         setWorkflow(workflowResponse.data);
       } catch (err) {
@@ -158,7 +159,7 @@ const CaseDetail = () => {
   const fetchReports = async () => {
     try {
       const response = await axios.get(
-        `http://localhost:8005/api/reports/case/${caseId}`,
+        `${REPORTS_API}/api/reports/case/${caseId}`,
         {
           headers: {
             Authorization: `Bearer ${localStorage.getItem("access_token")}`,
@@ -187,7 +188,7 @@ const CaseDetail = () => {
     }
 
     try {
-      await axios.delete(`http://localhost:8005/api/reports/${reportId}`, {
+      await axios.delete(`${REPORTS_API}/api/reports/${reportId}`, {
         headers: {
           Authorization: `Bearer ${localStorage.getItem("access_token")}`,
         },

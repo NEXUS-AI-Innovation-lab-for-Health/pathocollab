@@ -38,7 +38,7 @@ echo 'Infra lancée';
 exec bash
 "
 
-sleep 5
+sleep 30
 
 # --- BACKEND ---
 gnome-terminal --title="BACKEND" -- bash -c "
@@ -80,7 +80,7 @@ uvicorn app.main:app --port 8004 --reload;
 exec bash
 "
 
-sleep 3
+sleep 5
 
 # --- FRONTEND ---
 gnome-terminal --title="FRONTEND" -- bash -c "

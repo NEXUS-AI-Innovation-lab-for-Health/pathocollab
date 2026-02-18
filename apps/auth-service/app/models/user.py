@@ -1,9 +1,12 @@
 from sqlalchemy import Column, String, Boolean, DateTime, Enum as SQLEnum
+import sqlalchemy
+from sqlalchemy.orm import Mapped, mapped_column
 from sqlalchemy.ext.declarative import declarative_base
 from datetime import datetime, timezone
-from pydantic import BaseModel, EmailStr, Field
+from pydantic import BaseModel, ConfigDict, EmailStr, Field
 from typing import Optional
 import enum
+from enum import Enum
 import uuid
 
 Base = declarative_base()
@@ -16,23 +19,25 @@ class UserRole(str, enum.Enum):
 
 class UserDB(Base):
     __tablename__ = "users"
-    
-    id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
-    email = Column(String, unique=True, nullable=False, index=True)
-    hashed_password = Column(String, nullable=False)
-    full_name = Column(String, nullable=False)
-    role = Column(String(50), nullable=False, default="anatomopathologiste")
-    is_active = Column(Boolean, default=True)
-    is_verified = Column(Boolean, default=False)
-    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
-    updated_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
-    last_login = Column(DateTime(timezone=True), nullable=True)
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
+    email: Mapped[str] = mapped_column(String, unique=True, nullable=False, index=True)
+    hashed_password: Mapped[str] = mapped_column(String, nullable=False)
+    full_name: Mapped[str] = mapped_column(String, nullable=False)
+
+    role: Mapped[str] = mapped_column(String, nullable=False)
+
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    is_verified: Mapped[bool] = mapped_column(Boolean, default=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
+    last_login: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
 class User(BaseModel):
     id: str
     email: EmailStr
     full_name: str
-    role: UserRole
+    role: str
     is_active: bool = True
     is_verified: bool = False
     created_at: datetime
@@ -40,6 +45,16 @@ class User(BaseModel):
     
     class Config:
         from_attributes = True
+
+
+class UserOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: str
+    email: str
+    full_name: Optional[str] = None
+    role: UserRole
+
 
 class UserCreate(BaseModel):
     email: EmailStr

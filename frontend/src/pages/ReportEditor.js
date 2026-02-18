@@ -11,6 +11,11 @@ import { toast } from "sonner";
 import axios from "axios";
 import { getCurrentUser } from "@/services/auth";
 
+
+const CASES_API = process.env.REACT_APP_CASES_SERVICE_URL || `${window.location.protocol}//${window.location.hostname}:8002`;
+const WORKFLOW_API = process.env.REACT_APP_WORKFLOW_SERVICE_URL || `${window.location.protocol}//${window.location.hostname}:8003`;
+const REPORTS_API = process.env.REACT_APP_REPORTS_SERVICE_URL || `${window.location.protocol}//${window.location.hostname}:8005`;
+
 const getStatusLabel = (status) => {
   const labels = {
     pending: "En attente",
@@ -62,7 +67,7 @@ const ReportEditor = () => {
   const fetchCaseDetails = async () => {
     try {
       const response = await axios.get(
-        `http://localhost:8002/api/cases/${caseId}`,
+        `${CASES_API}/api/cases/${caseId}`,
       );
       setCaseData(response.data);
 
@@ -84,7 +89,7 @@ const ReportEditor = () => {
   const fetchExistingReport = async () => {
     try {
       const response = await axios.get(
-        `http://localhost:8005/api/reports/${reportId}`,
+        `${REPORTS_API}/api/reports/${reportId}`,
         {
           headers: {
             Authorization: `Bearer ${localStorage.getItem("access_token")}`,
@@ -161,17 +166,7 @@ const ReportEditor = () => {
           const tokenData = JSON.parse(atob(token.split(".")[1]));
           const email = tokenData.sub || tokenData.email || "";
 
-          if (email === "dr.smith@pixtral.fr") {
-            userId = "dr.smith@pixtral.fr";
-          } else if (email === "admin@pixtral.fr") {
-            userId = "admin@pixtral.fr";
-          } else if (email === "dr.johnson@pixtral.fr") {
-            userId = "dr.johnson@pixtral.fr";
-          } else if (email === "dr.williams@pixtral.fr") {
-            userId = "dr.williams@pixtral.fr";
-          } else {
-            userId = email || "Utilisateur inconnu";
-          }
+          userId = email || "Utilisateur inconnu";
         } catch (error) {
           console.error("Erreur de décodage du token:", error);
         }
@@ -206,7 +201,7 @@ ${reportData.conclusion || "Aucune conclusion"}
       if (isEditing) {
         // Mettre à jour le rapport existant
         response = await axios.put(
-          `http://localhost:8005/api/reports/${reportId}`,
+          `${REPORTS_API}/api/reports/${reportId}`,
           reportPayload,
           {
             headers: {
@@ -218,7 +213,7 @@ ${reportData.conclusion || "Aucune conclusion"}
       } else {
         // Créer un nouveau rapport
         response = await axios.post(
-          "http://localhost:8005/api/reports/",
+          `${REPORTS_API}/api/reports/`,
           reportPayload,
           {
             headers: {
@@ -237,12 +232,12 @@ ${reportData.conclusion || "Aucune conclusion"}
         try {
           // D'abord récupérer le workflow par case_id
           const workflowResponse = await axios.get(
-            `http://localhost:8003/api/workflows/case/${caseId}`,
+            `${WORKFLOW_API}/api/workflows/case/${caseId}`,
           );
 
           // Puis avancer le workflow avec son ID
           await axios.post(
-            `http://localhost:8003/api/workflows/${workflowResponse.data.id}/advance`,
+            `${WORKFLOW_API}/api/workflows/${workflowResponse.data.id}/advance`,
             {},
           );
           console.log("Workflow mis à jour avec succès");
@@ -256,7 +251,7 @@ ${reportData.conclusion || "Aucune conclusion"}
         // Mettre à jour le statut du cas
         try {
           await axios.patch(
-            `http://localhost:8002/api/cases/${caseId}/status?status=in_progress`,
+            `${CASES_API}/api/cases/${caseId}/status?status=in_progress`,
             {},
             {
               headers: {
@@ -302,17 +297,7 @@ ${reportData.conclusion || "Aucune conclusion"}
           const tokenData = JSON.parse(atob(token.split(".")[1]));
           const email = tokenData.sub || tokenData.email || "";
 
-          if (email === "dr.smith@pixtral.fr") {
-            userId = "dr.smith@pixtral.fr";
-          } else if (email === "admin@pixtral.fr") {
-            userId = "admin@pixtral.fr";
-          } else if (email === "dr.johnson@pixtral.fr") {
-            userId = "dr.johnson@pixtral.fr";
-          } else if (email === "dr.williams@pixtral.fr") {
-            userId = "dr.williams@pixtral.fr";
-          } else {
-            userId = email || "Utilisateur inconnu";
-          }
+          userId = email || "Utilisateur inconnu";
         } catch (error) {
           console.error("Erreur de décodage du token:", error);
         }
@@ -347,7 +332,7 @@ ${reportData.conclusion || "Aucune conclusion"}
       if (isEditing) {
         // Mettre à jour le rapport existant et le marquer comme final
         response = await axios.put(
-          `http://localhost:8005/api/reports/${reportId}`,
+          `${REPORTS_API}/api/reports/${reportId}`,
           reportPayload,
           {
             headers: {
@@ -359,7 +344,7 @@ ${reportData.conclusion || "Aucune conclusion"}
       } else {
         // Créer un nouveau rapport
         response = await axios.post(
-          "http://localhost:8005/api/reports/",
+          `${REPORTS_API}/api/reports/`,
           reportPayload,
           {
             headers: {
@@ -377,12 +362,12 @@ ${reportData.conclusion || "Aucune conclusion"}
       try {
         // D'abord récupérer le workflow par case_id
         const workflowResponse = await axios.get(
-          `http://localhost:8003/api/workflows/case/${caseId}`,
+          `${WORKFLOW_API}/api/workflows/case/${caseId}`,
         );
 
         // Puis avancer le workflow avec son ID
         await axios.post(
-          `http://localhost:8003/api/workflows/${workflowResponse.data.id}/advance`,
+          `${WORKFLOW_API}/api/workflows/${workflowResponse.data.id}/advance`,
           {},
         );
         console.log("Workflow mis à jour avec succès");
@@ -395,7 +380,7 @@ ${reportData.conclusion || "Aucune conclusion"}
       // Mettre à jour le statut du cas
       try {
         await axios.patch(
-          `http://localhost:8002/api/cases/${caseId}/status?status=in_progress`,
+          `${CASES_API}/api/cases/${caseId}/status?status=in_progress`,
           {},
           {
             headers: {

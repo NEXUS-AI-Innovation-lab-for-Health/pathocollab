@@ -16,9 +16,9 @@ import { toast } from "sonner";
 import axios from "axios";
 import { getCurrentUser } from "@/services/auth";
 
-
-const CASES_API = process.env.REACT_APP_CASES_SERVICE_URL || `${window.location.protocol}//${window.location.hostname}:8000`;
-const WORKFLOW_API = process.env.REACT_APP_WORKFLOW_SERVICE_URL || `${window.location.protocol}//${window.location.hostname}:8000`;
+const AUTH_API = process.env.REACT_APP_AUTH_SERVICE_URL || `${window.location.protocol}//${window.location.hostname}:8001`;
+const CASES_API = process.env.REACT_APP_CASES_SERVICE_URL || `${window.location.protocol}//${window.location.hostname}:8002`;
+const WORKFLOW_API = process.env.REACT_APP_WORKFLOW_SERVICE_URL || `${window.location.protocol}//${window.location.hostname}:8003`;
 
 const NewCase = () => {
   const navigate = useNavigate();
@@ -36,12 +36,10 @@ const NewCase = () => {
     { id: 2, name: "radio2.jpg", date: "10/11/2023", type: "Radio latérale" },
   ]);
   const [selectedImages, setSelectedImages] = useState([]);
-  const [specialists, setSpecialists] = useState([
-    { id: 1, name: "Dr. Smith", specialty: "Orthodontiste" },
-    { id: 2, name: "Dr. Johnson", specialty: "Chirurgien maxillo-facial" },
-    { id: 3, name: "Dr. Williams", specialty: "Pédodontiste" },
-  ]);
+  const [specialists, setSpecialists] = useState([]);
   const [selectedSpecialists, setSelectedSpecialists] = useState([]);
+  const [specialistsLoading, setSpecialistsLoading] = useState(false);
+  const [specialistsError, setSpecialistsError] = useState(null);
   const [description, setDescription] = useState("");
 
 
@@ -71,9 +69,42 @@ const NewCase = () => {
     setSelectedSpecialists(newSpecialists);
   };
 
+  useEffect(() => {
+    const load = async () => {
+      setSpecialistsLoading(true);
+      setSpecialistsError(null);
+      try {
+        const token = localStorage.getItem("access_token");
+        const res = await axios.get(`${AUTH_API}/api/auth/specialists/`, {
+          headers: {
+            Authorization: `Bearer ${token}`,
+            Accept: "application/json",
+          },
+        });
+
+        // Normalisation : adapte si ton API renvoie autre chose
+        const list = Array.isArray(res.data) ? res.data : (res.data?.items ?? []);
+        const normalized = list.map((s) => ({
+          id: String(s.id ?? s.user_id ?? s.uuid ?? ""),
+          name: s.full_name ?? s.name ?? s.username ?? s.email ?? "Spécialiste",
+          email: s.email ?? s.mail ?? "",
+          specialty: s.role ?? s.specialty ?? s.job ?? "",
+        }));
+
+        setSpecialists(normalized);
+      } catch (e) {
+        setSpecialistsError(e?.response?.data ?? e.message);
+      } finally {
+        setSpecialistsLoading(false);
+      }
+    };
+
+    load();
+  }, [AUTH_API]);
+
   const addSpecialist = (specialistId) => {
     if (!specialistId) return; // Vérifier si l'ID est défini
-    const specialist = specialists.find((s) => s.id === parseInt(specialistId));
+    const specialist = specialists.find((s) => String(s.id) === String(specialistId));
     if (
       specialist &&
       !selectedSpecialists.some((s) => s.id === specialist.id)
@@ -92,7 +123,7 @@ const NewCase = () => {
       console.log("Fetching patients with token:", token);
       const headers = token ? { Authorization: `Bearer ${token}` } : {};
 
-      const response = await axios.get(`${CASES_API}/api/patients/`, {
+      const response = await axios.get(`${CASES_API}/api/patients/list`, {
         headers: headers,
       });
       setPatients(response.data);
@@ -147,22 +178,28 @@ const NewCase = () => {
       };
 
       // Envoyer au Cases Service
-      const response = await axios.post(`${CASES_API}/api/cases/`, caseData, { headers });
+      console.log("CASES_API =", CASES_API);
 
+      const response = await axios.post(
+        `${CASES_API}/api/cases/create/`,
+        caseData,
+        {
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${localStorage.getItem("access_token")}`,
+          },
+        },
+      );
 
       // Créer le workflow pour ce cas
       const workflowData = {
         case_id: response.data.id,
         specialists_order: selectedSpecialists.map((s) => {
-          // Mapper les noms vers les emails
-          if (s.name === "Dr. Smith") return "dr.smith@pixtral.fr";
-          if (s.name === "Dr. Johnson") return "dr.johnson@pixtral.fr";
-          if (s.name === "Dr. Williams") return "dr.williams@pixtral.fr";
-          return s.name; // Fallback
+          return s.email;
         }),
       };
 
-      await axios.post(`${WORKFLOW_API}/api/workflows`, workflowData, {
+      await axios.post(`${WORKFLOW_API}/api/workflows/`, workflowData, {
         headers: {
           "Content-Type": "application/json",
           Authorization: `Bearer ${localStorage.getItem("access_token")}`,

@@ -61,6 +61,7 @@ class PatientBase(BaseModel):
     medical_history: Optional[str] = None
     symptoms: Optional[str] = None
     imaging_notes: Optional[str] = None
+    date_of_birth: Optional[datetime] = None
 
 class PatientCreate(PatientBase):
     pass
@@ -69,6 +70,7 @@ class PatientResponse(PatientBase):
     id: str
     created_at: datetime
     updated_at: Optional[datetime] = None
+    date_of_birth: Optional[datetime] = None
     
     class Config:
         from_attributes = True

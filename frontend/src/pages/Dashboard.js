@@ -28,8 +28,9 @@ import {
 import { toast } from "sonner";
 import { getCurrentUser } from "@/services/auth";
 
+const AUTH_API = process.env.REACT_APP_AUTH_URL || `${window.location.protocol}//${window.location.hostname}:8001`;
 const CASES_API = process.env.REACT_APP_BACKEND_URL || `${window.location.protocol}//${window.location.hostname}:8002`;
-const AUTH_API = process.env.REACT_APP_AUTH_URL || `${window.location.protocol}//${window.location.hostname}:8001`; // Même port que CASES_API car c'est le port du service d'authentification
+const WORKFLOW_API = process.env.REACT_APP_WORKFLOW_URL || `${window.location.protocol}//${window.location.hostname}:8003`;
 
 const Dashboard = () => {
   const [cases, setCases] = useState([]);
@@ -102,7 +103,7 @@ const Dashboard = () => {
       console.log("Email extrait:", email);
 
       const response = await axios.get(
-        `http://localhost:8003/api/notifications/user/${email}`,
+        `${WORKFLOW_API}/api/notifications/user/${email}`,
         {
           headers: {
             Authorization: `Bearer ${token}`,
@@ -121,7 +122,7 @@ const Dashboard = () => {
   const markAsRead = async (notificationId) => {
     try {
       await axios.patch(
-        `http://localhost:8003/api/notifications/${notificationId}/read`,
+        `${WORKFLOW_API}/api/notifications/${notificationId}/read`,
         {},
         {
           headers: {
@@ -163,7 +164,7 @@ const Dashboard = () => {
   const fetchCases = async () => {
     try {
       // Récupérer les cas depuis l'API Cases Service
-      const response = await axios.get("http://localhost:8002/api/cases/", {
+      const response = await axios.get(`${CASES_API}/api/cases/list`, {
         headers: {
           Authorization: `Bearer ${localStorage.getItem("access_token")}`,
         },
@@ -186,7 +187,7 @@ const Dashboard = () => {
       )
     ) {
       try {
-        await axios.delete(`http://localhost:8002/api/cases/${caseId}`, {
+        await axios.delete(`${CASES_API}/api/cases/delete/${caseId}`, {
           headers: {
             Authorization: `Bearer ${localStorage.getItem("access_token")}`,
           },
@@ -203,7 +204,7 @@ const Dashboard = () => {
   const fetchSpecialistsCount = async () => {
     try {
       const response = await axios.get(
-        `http://localhost:8001/api/auth/specialists/count`,
+        `${AUTH_API}/api/auth/specialists/count`,
         {
           headers: {
             Authorization: `Bearer ${localStorage.getItem("access_token")}`,

@@ -1,8 +1,8 @@
-from sqlalchemy import Column, String, Integer, DateTime, Text
+from sqlalchemy import Column, Date, String, Integer, DateTime, Text
 from sqlalchemy.ext.declarative import declarative_base
 from pydantic import BaseModel, Field
 from typing import Optional
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 import uuid
 
 Base = declarative_base()
@@ -14,6 +14,7 @@ class PatientDB(Base):
     full_name = Column(String, nullable=False)
     age = Column(Integer, nullable=False)
     gender = Column(String, nullable=False)
+    date_of_birth = Column(Date, nullable=True)
     medical_history = Column(Text, nullable=True)
     symptoms = Column(Text, nullable=True)
     imaging_notes = Column(Text, nullable=True)
@@ -29,6 +30,7 @@ class Patient(BaseModel):
     symptoms: Optional[str] = None
     imaging_notes: Optional[str] = None
     created_at: datetime
+    date_of_birth: Optional[date] = None
     
     class Config:
         from_attributes = True
@@ -40,3 +42,4 @@ class PatientCreate(BaseModel):
     medical_history: Optional[str] = None
     symptoms: Optional[str] = None
     imaging_notes: Optional[str] = None
+    date_of_birth: Optional[date] = None
