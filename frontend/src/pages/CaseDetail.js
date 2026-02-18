@@ -27,6 +27,7 @@ import OpenSeadragonUrlViewer from "../components/OpenSeadragon/OpenSeadragonUrl
 
 const CASES_API = process.env.REACT_APP_BACKEND_URL || `${window.location.protocol}//${window.location.hostname}:8002`;
 const WORKFLOW_API = process.env.REACT_APP_WORKFLOW_URL || `${window.location.protocol}//${window.location.hostname}:8003`;
+const IMAGES_API = process.env.REACT_APP_IMAGES_URL || `${window.location.protocol}//${window.location.hostname}:8004`;
 const REPORTS_API = process.env.REACT_APP_REPORTS_URL || `${window.location.protocol}//${window.location.hostname}:8005`;
 
 const getStatusLabel = (status) => {
@@ -85,7 +86,7 @@ const CaseDetail = () => {
 
         const token = localStorage.getItem("access_token");
         const res = await axios.get(
-          `${CASES_API}/api/debug/wsi-dzi?patient_id=${encodeURIComponent(patient.id)}`,
+          `${IMAGES_API}/api/debug/wsi-dzi?patient_id=${encodeURIComponent(patient.id)}`,
           token ? { headers: { Authorization: `Bearer ${token}` } } : undefined,
         );
 
@@ -116,7 +117,7 @@ const CaseDetail = () => {
 
     return {
       type: "dzi",
-      url: `${CASES_API}/api/wsi/patients/${encodeURIComponent(patient.id)}/${encodeURIComponent(selectedWsi.wsi_id)}/dzi`,
+      url: `${IMAGES_API}/api/wsi/patients/${encodeURIComponent(patient.id)}/${encodeURIComponent(selectedWsi.wsi_id)}/dzi`,
       key: `${patient.id}:${selectedWsi.wsi_id}`,
     };
   }, [patient?.id, selectedWsi?.wsi_id]);
@@ -337,78 +338,85 @@ const CaseDetail = () => {
   };
 
   const handleDownloadPDF = async (report) => {
-    setGeneratingPDF(true);
-    try {
-      const pdf = new jsPDF();
-      let yPos = 20;
-
-      // Add header information
-      pdf.setFontSize(18);
-      pdf.setFont("helvetica", "bold");
-      pdf.text(`Rapport d'analyse - ${caseData.id}`, 20, yPos);
-      yPos += 10;
-
-      pdf.setFontSize(12);
-      pdf.setFont("helvetica", "normal");
-      pdf.text(
-        `Par ${report.user_id} • ${new Date(
-          report.created_at,
-        ).toLocaleDateString("fr-FR")}`,
-        20,
-        yPos,
-      );
-      yPos += 8;
-
-      pdf.setFontSize(14);
-      pdf.setFont("helvetica", "bold");
-      pdf.text(`Titre: ${report.title}`, 20, yPos);
-      yPos += 12;
-
-      // Parse and add report content with proper formatting
-      pdf.setFontSize(12);
-      pdf.setFont("helvetica", "normal");
-
-      const lines = report.content.split("\n");
-      for (const line of lines) {
-        if (line.trim()) {
-          // Check if it's a title (starts with **)
-          if (line.startsWith("**") && line.endsWith("**")) {
-            pdf.setFont("helvetica", "bold");
-            const title = line.replace(/\*\*/g, "");
-            pdf.text(title, 20, yPos);
-            yPos += 8;
-          } else {
-            pdf.setFont("helvetica", "normal");
-            // Handle long lines by splitting them
-            const splitText = pdf.splitTextToSize(line, 170);
-            for (const textLine of splitText) {
-              pdf.text(textLine, 20, yPos);
-              yPos += 6;
-            }
+      setGeneratingPDF(true);
+      try {
+        const pdf = new jsPDF();
+        let yPos = 20;
+  
+        const ensurePage = (extra = 0) => {
+          if (yPos + extra > 270) {
+            pdf.addPage();
+            yPos = 20;
           }
-        } else {
-          yPos += 4; // Add space for empty lines
-        }
-
-        // Check if we need a new page
-        if (yPos > 270) {
-          pdf.addPage();
-          yPos = 20;
-        }
+        };
+  
+        // Add header information
+        pdf.setFontSize(18);
+        pdf.setFont("helvetica", "bold");
+        ensurePage(10);
+        pdf.text(`Rapport d'analyse - ${caseData.id}`, 20, yPos);
+        yPos += 10;
+  
+        pdf.setFontSize(12);
+        pdf.setFont("helvetica", "normal");
+        ensurePage(8);
+        pdf.text(
+          `Par ${report.user_id} • ${new Date(
+            report.created_at,
+          ).toLocaleDateString("fr-FR")}`,
+          20,
+          yPos,
+        );
+        yPos += 8;
+  
+        pdf.setFontSize(14);
+        pdf.setFont("helvetica", "bold");
+        ensurePage(12);
+        pdf.text(`Titre: ${report.title}`, 20, yPos);
+        yPos += 12;
+  
+        // Parse and add report content with proper formatting
+        pdf.setFontSize(12);
+        pdf.setFont("helvetica", "normal");
+  
+        const lines = report.content.split("\n");
+        for (const line of lines) {
+          if (line.trim()) {
+            // Check if it's a title (starts with **)
+            if (line.startsWith("**") && line.endsWith("**")) {
+              pdf.setFont("helvetica", "bold");
+              const title = line.replace(/\*\*/g, "");
+              ensurePage(8);
+              pdf.text(title, 20, yPos);
+              yPos += 8;
+            } else {
+              pdf.setFont("helvetica", "normal");
+              // Handle long lines by splitting them
+              const splitText = pdf.splitTextToSize(line, 170);
+              for (const textLine of splitText) {
+                ensurePage(6);
+                pdf.text(textLine, 20, yPos);
+                yPos += 6;
+              }
+            }
+          } else {
+            ensurePage(4);
+            yPos += 4; // Add space for empty lines
+          }
+  }
+  
+        pdf.save(
+          `rapport_${report.title.replace(/[^a-z0-9]/gi, "_").toLowerCase()}.pdf`,
+        );
+  
+        toast.success("PDF téléchargé avec succès");
+      } catch (error) {
+        console.error("Error generating PDF:", error);
+        toast.error("Erreur lors de la génération du PDF");
+      } finally {
+        setGeneratingPDF(false);
       }
-
-      pdf.save(
-        `rapport_${report.title.replace(/[^a-z0-9]/gi, "_").toLowerCase()}.pdf`,
-      );
-
-      toast.success("PDF téléchargé avec succès");
-    } catch (error) {
-      console.error("Error generating PDF:", error);
-      toast.error("Erreur lors de la génération du PDF");
-    } finally {
-      setGeneratingPDF(false);
-    }
-  };
+    };
 
   if (loading) {
     return (

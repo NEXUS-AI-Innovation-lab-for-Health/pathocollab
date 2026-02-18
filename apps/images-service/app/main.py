@@ -1,6 +1,6 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from app.routes import images, annotations
+from app.routes import images, annotations, wsi, debug_browser, debug_wsi_dzi
 import os
 from dotenv import load_dotenv
 import logging
@@ -29,6 +29,9 @@ app.add_middleware(
 
 app.include_router(images.router, prefix="/api")
 app.include_router(annotations.router, prefix="/api")
+app.include_router(wsi.router, prefix="/api")
+app.include_router(debug_browser.router, prefix="/api")
+app.include_router(debug_wsi_dzi.router, prefix="/api")
 
 @app.get("/health")
 def health_check():

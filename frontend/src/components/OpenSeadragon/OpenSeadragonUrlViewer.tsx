@@ -38,10 +38,10 @@ import {
   polygonCancel,
 } from "./drawPolygon";
 
-const API_BASE_URL =
-  process.env.REACT_APP_API_BASE_URL?.trim() ||
-  process.env.REACT_APP_BACKEND_URL?.trim() ||
-  `${window.location.protocol}//${window.location.hostname}:8000`;
+const IMAGES_API = process.env.REACT_APP_IMAGES_API?.trim() || `${window.location.protocol}//${window.location.hostname}:8004`;
+
+const OSD_PREFIX_URL = `${IMAGES_API}/api/wsi/openseadragon-images/`;
+
 
 type SourceType = "dzi" | "image";
 type DrawTool = AnnotationType;
@@ -106,7 +106,7 @@ export default function OpenSeadragonUrlViewer(
   async function fetchAnnotationsForImage(
     imgId: string,
   ): Promise<ApiAnnotationRow[]> {
-    const res = await fetch(`${API_BASE_URL}/api/annotations/image/${imgId}`, {
+    const res = await fetch(`${IMAGES_API}/api/annotations/image/${imgId}`, {
       headers: {
         ...authHeaders(),
       },
@@ -207,7 +207,7 @@ export default function OpenSeadragonUrlViewer(
 
     const viewer = OpenSeadragon({
       element: containerRef.current,
-      prefixUrl: "http://127.0.0.1:8000/api/wsi/openseadragon-images/",
+      prefixUrl: OSD_PREFIX_URL,
       showNavigator: true,
       tileSources,
     });
@@ -475,7 +475,7 @@ export default function OpenSeadragonUrlViewer(
     console.log("access_token:", localStorage.getItem("access_token"));
     console.log("authHeaders():", authHeaders());
 
-    const res = await fetch(`${API_BASE_URL}/api/annotations/`, {
+    const res = await fetch(`${IMAGES_API}/api/annotations/`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",

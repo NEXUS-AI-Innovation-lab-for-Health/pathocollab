@@ -82,14 +82,14 @@ async def convert_wsi_to_dzi(wsi_id: str, patient_id: str, object_name: str, bac
                     # Ne pas lever d'erreur, essayer directement la conversion
                 else:
                     error_msg = f"""
-VIPS is not found or not accessible. 
+                                        VIPS is not found or not accessible. 
 
-Please install libvips-tools:
-- Windows: Download from https://github.com/libvips/libvips/releases or use choco: choco install vips
-- Ubuntu/Debian: sudo apt-get install libvips-tools  
-- macOS: brew install vips
+                                        Please install libvips-tools:
+                                        - Windows: Download from https://github.com/libvips/libvips/releases or use choco: choco install vips
+                                        - Ubuntu/Debian: sudo apt-get install libvips-tools  
+                                        - macOS: brew install vips
 
-Make sure vips is in your PATH and restart the backend server.
+                                        Make sure vips is in your PATH and restart the backend server.
                     """
                     print(error_msg)
                     raise HTTPException(status_code=500, detail=error_msg.strip())

@@ -1,15 +1,5 @@
 from __future__ import annotations
 
-
-def _role_to_str(r):
-    # accepte str, Enum (UserRole), ou autre
-    try:
-        v = getattr(r, "value", r)
-    except Exception:
-        v = r
-    if isinstance(v, str):
-        return v.strip().lower()
-    return str(v)
 import uuid
 from datetime import datetime, timezone
 from typing import List

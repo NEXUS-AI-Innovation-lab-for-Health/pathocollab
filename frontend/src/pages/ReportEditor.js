@@ -71,12 +71,32 @@ const ReportEditor = () => {
       );
       setCaseData(response.data);
 
+      let userId = "Spécialiste inconnu";
+
+      try {
+        // Récupérer l'utilisateur connecté
+        const token = localStorage.getItem("access_token");
+
+        if (token) {
+          try {
+            const tokenData = JSON.parse(atob(token.split(".")[1]));
+            const email = tokenData.sub || tokenData.email || "";
+
+            userId = email || "Spécialiste inconnu";
+          } catch (error) {
+            console.error("Erreur de décodage du token:", error);
+          }
+        }
+      } catch (error) {
+        console.error("Erreur lors de la récupération de l'utilisateur:", error);
+      }
+
       // Pré-remplir certaines données du rapport
       setReportData((prev) => ({
         ...prev,
         title: `Rapport d'analyse - ${response.data.id}`,
         patient_id: response.data.patient_id,
-        specialist_name: "Dr. Spécialiste", // À remplacer avec l'utilisateur connecté
+        specialist_name: userId, 
       }));
     } catch (error) {
       console.error("Error fetching case details:", error);
