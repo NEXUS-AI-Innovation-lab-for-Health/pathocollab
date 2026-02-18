@@ -17,8 +17,6 @@ from models import User, StatusCheck, Case, Patient
 from schemas import UserLogin, UserRegister, Token, CaseResponse, PatientResponse, PatientImageItem, StatusCheckResponse, CaseCreate, PatientCreate, StatusCheckCreate
 from auth import verify_password, get_password_hash, create_access_token, verify_token, get_current_user
 
-from imageAnalyse import init_image_service, mount_image_service
-
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env')
 
@@ -39,7 +37,6 @@ app.add_middleware(
 @app.on_event("startup")
 async def startup_event():
     await init_db()
-    init_image_service()
 
     # --- Créer les tables image-service si absentes (mode DEV) ---
     # IMPORTANT: on importe les models pour "enregistrer" leurs metadata
@@ -381,8 +378,6 @@ async def get_status_checks(db: AsyncSession = Depends(get_db)):
     result = await db.execute(select(StatusCheck))
     status_checks = result.scalars().all()
     return status_checks
-
-mount_image_service(api_router, app)
 
 # Include the router in the main app
 app.include_router(api_router)
