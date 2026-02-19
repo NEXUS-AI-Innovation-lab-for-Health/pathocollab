@@ -12,7 +12,6 @@ services:
     ports:
       - "5432:5432"
     volumes:
-      - postgres-data:/var/lib/postgresql/data
       - ./postgres/init-multiple-databases.sh:/docker-entrypoint-initdb.d/init-multiple-databases.sh
       - ./postgres/seed-databases.sh:/docker-entrypoint-initdb.d/seed-databases.sh
       - ./postgres/seed:/docker-entrypoint-initdb.d/seed
