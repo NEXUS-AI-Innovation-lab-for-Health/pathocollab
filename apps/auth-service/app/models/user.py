@@ -15,7 +15,7 @@ class UserRole(str, enum.Enum):
     ADMIN = "admin"
     ANATOMOPATHOLOGISTE = "anatomopathologiste"
     ONCOLOGUE = "oncologue"
-    ORTHODONTISTE = "orthodontiste"
+    RADIOLOGUE = "radiologue"
 
 class UserDB(Base):
     __tablename__ = "users"
