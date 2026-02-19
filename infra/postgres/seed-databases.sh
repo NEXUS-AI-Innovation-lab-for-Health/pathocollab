@@ -14,10 +14,10 @@ run_sql () {
     fi
 }
 
-run_sql "auth_db"     "/docker-entrypoint-initdb.d/seed/10-auth.sql"
-run_sql "cases_db"    "/docker-entrypoint-initdb.d/seed/20-cases.sql"
-run_sql "workflow_db" "/docker-entrypoint-initdb.d/seed/30-workflow.sql"
-run_sql "images_db"   "/docker-entrypoint-initdb.d/seed/40-images.sql"
-run_sql "reports_db"  "/docker-entrypoint-initdb.d/seed/50-reports.sql"
+run_sql "auth_db"     "/docker-entrypoint-initdb.d/seed/auth.sql"
+run_sql "cases_db"    "/docker-entrypoint-initdb.d/seed/cases.sql"
+run_sql "workflow_db" "/docker-entrypoint-initdb.d/seed/workflow.sql"
+run_sql "images_db"   "/docker-entrypoint-initdb.d/seed/images.sql"
+run_sql "reports_db"  "/docker-entrypoint-initdb.d/seed/reports.sql"
 
 echo "Seeding done."
