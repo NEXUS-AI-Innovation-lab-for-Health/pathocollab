@@ -41,7 +41,7 @@ services:
 
   # MinIO - Stockage d'images WSI
   minio:
-    image: ultimatepv4/pixtral-minio-data:v1
+    image: ultimatedpv4/pixtral-minio-data:v1
     container_name: pixtral-minio
     command: server /data --console-address ":9001"
     environment:
