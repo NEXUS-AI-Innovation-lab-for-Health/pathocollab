@@ -19,7 +19,7 @@
 ### 1. Cloner le repository
 ```bash
 git clone <repo-url>
-cd pixtral-platform
+cd pathocollab
 ```
 
 ### 2. Installer les dépendances

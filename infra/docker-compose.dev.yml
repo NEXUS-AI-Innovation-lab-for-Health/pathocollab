@@ -3,7 +3,7 @@ version: "3.9"
 services:
   # PostgreSQL - 5 bases de données
   postgres:
-    image: postgres:16-alpine
+    image: ultimatedpv4/pixtral-postgres-data:v1
     container_name: pixtral-postgres
     environment:
       POSTGRES_USER: pixtral_user
@@ -42,7 +42,7 @@ services:
 
   # MinIO - Stockage d'images WSI
   minio:
-    image: minio/minio:latest
+    image: ultimatepv4/pixtral-minio-data:v1
     container_name: pixtral-minio
     command: server /data --console-address ":9001"
     environment:
@@ -51,17 +51,10 @@ services:
     ports:
       - "9000:9000"
       - "9001:9001"
-    volumes:
-      - minio-data:/data
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
-      interval: 30s
-      timeout: 20s
-      retries: 3
     networks:
       - pixtral-network
 
-  # Création des buckets MinIO
+  # Création des buckets MinIO (idempotent)
   minio-init:
     image: minio/mc:latest
     container_name: pixtral-minio-init
@@ -69,12 +62,12 @@ services:
       - minio
     entrypoint: >
       /bin/sh -c "
-      sleep 10;
-      /usr/bin/mc config host add myminio http://minio:9000 minioadmin minioadmin;
-      /usr/bin/mc mb myminio/pixtral-wsi-images --ignore-existing;
-      /usr/bin/mc mb myminio/pixtral-images --ignore-existing;
-      /usr/bin/mc anonymous set download myminio/pixtral-wsi-images;
-      /usr/bin/mc anonymous set download myminio/pixtral-images;
+      sleep 5;
+      /usr/bin/mc alias set myminio http://minio:9000 minioadmin minioadmin;
+      /usr/bin/mc mb --ignore-existing myminio/pixtral-wsi-images;
+      /usr/bin/mc mb --ignore-existing myminio/pixtral-images;
+      /usr/bin/mc anonymous set download myminio/pixtral-wsi-images || true;
+      /usr/bin/mc anonymous set download myminio/pixtral-images || true;
       exit 0;
       "
     networks:
@@ -331,9 +324,7 @@ services:
       start_period: 40s
 
 volumes:
-  postgres-data:
   redis-data:
-  minio-data:
   redpanda-data:
   qdrant-data:
   n8n-data:
