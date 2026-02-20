@@ -1,4 +1,4 @@
-# Pixtral - Plateforme de Collaboration en Pathologie
+# PathoCollab - Plateforme de Collaboration en Pathologie
 
 [![CI Status](https://img.shields.io/badge/CI-passing-brightgreen)]()
 [![License](https://img.shields.io/badge/license-Academic-blue)]()
@@ -8,7 +8,7 @@
 
 ## 🏥 Vue d'ensemble
 
-Pixtral est une plateforme web collaborative pour l'analyse de biopsies entre anatomopathologistes et oncologues, avec assistance IA (GPT-4o). 
+PathoCollab est une plateforme web collaborative pour l'analyse de biopsies entre anatomopathologistes et oncologues, avec assistance IA (GPT-4o). 
 
 **Projet académique** - SAE 6 - Équipe Onco NexCode
 
