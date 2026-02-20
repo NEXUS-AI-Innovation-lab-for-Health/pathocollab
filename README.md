@@ -90,11 +90,8 @@ infra/
 
 ```bash
 # Cloner le repository
-git clone https://github.com/votre-org/pixtral-platform.git
-cd pixtral-platform
-
-# Installer les dépendances root (Turborepo)
-yarn install
+git clone https://github.com/NEXUS-AI-Innovation-lab-for-Health/pathocollab.git
+cd pathocollab
 
 # Installer les dépendances backend
 cd apps/auth-service && py -m pip install -r requirements.txt && cd ../..
@@ -111,21 +108,11 @@ cd apps/web && yarn install && cd ../..
 
 ```bash
 cd infra
-docker-compose -f docker-compose.dev.yml up -d
+docker compose -f docker-compose.dev.yml up -d
 cd ..
 
 # Attendre que les services soient prêts (30 secondes)
 sleep 30
-```
-
-#### 3️⃣ Initialiser les bases de données
-
-```bash
-# Rendre les scripts exécutables
-chmod +x scripts/*.sh
-
-# Lancer les migrations Alembic pour les 5 services
-bash scripts/init-databases.sh
 ```
 
 ### ▶️ Démarrer les services
