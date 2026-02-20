@@ -6,7 +6,8 @@ from typing import List
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.user import UserCreate, UserLogin, User, UserOut
+from app.deps.auth import get_current_user
+from app.models.user import UserCreate, UserLogin, User, UserDB, UserOut
 from app.models.token import Token
 from app.services.auth_service import AuthService
 from app.utils.database import get_db
@@ -29,15 +30,14 @@ async def login(login_data: UserLogin, db: AsyncSession = Depends(get_db)):
 
 
 @router.get("/me", response_model=User)
-async def get_current_user(user_id: str, db: AsyncSession = Depends(get_db)):
-    """Récupérer le profil de l'utilisateur connecté"""
-    return await AuthService.get_user_by_id(db, user_id)
+async def me(current_user: UserDB = Depends(get_current_user)):
+    """Récupérer le profil de l'utilisateur connecté via JWT"""
+    return User.model_validate(current_user)
 
 
 @router.get("/users/list", response_model=List[UserOut])
-async def list_users(db: AsyncSession = Depends(get_db)) -> List[UserOut]:
+async def list_users(db: AsyncSession = Depends(get_db), _: UserDB = Depends(get_current_user),) -> List[UserOut]:
     users = await AuthService.list_users(db)
-    # users doit être une liste d'objets ORM UserDB
     return [UserOut.model_validate(u) for u in users]
 
 

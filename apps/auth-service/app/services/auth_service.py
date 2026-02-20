@@ -116,7 +116,7 @@ class AuthService:
         res = await db.execute(
             select(UserDB).where(
                 UserDB.is_active == True,  # noqa: E712
-                UserDB.role.in_(["orthodontiste", "anatomopathologiste", "oncologue"]),
+                UserDB.role.in_(["orthodontiste", "anatomopathologiste", "oncologue", "radiologue"]),
             )
         )
         specialists = res.scalars().all()
@@ -127,7 +127,7 @@ class AuthService:
         res = await db.execute(
             select(UserDB.id).where(
                 UserDB.is_active == True,  # noqa: E712
-                UserDB.role.in_(["orthodontiste", "anatomopathologiste", "oncologue"]),
+                UserDB.role.in_(["orthodontiste", "anatomopathologiste", "oncologue", "radiologue"]),
             )
         )
         count = len(res.scalars().all())
