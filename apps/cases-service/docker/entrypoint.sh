@@ -19,10 +19,11 @@ DB_PORT="$(echo "$DATABASE_URL" | sed -n 's#.*@\(.*\):\([0-9]\+\)/.*#\2#p')"
 DB_HOST="${DB_HOST:-postgres}"
 DB_PORT="${DB_PORT:-5432}"
 
-echo "⏳ Waiting for postgres at ${DB_HOST}:${DB_PORT}..."
+echo "⏳ Waiting for postgres (real connection) ..."
 for i in $(seq 1 60); do
-  if pg_isready -h "$DB_HOST" -p "$DB_PORT" >/dev/null 2>&1; then
-    echo "✅ Postgres is ready"
+  if PGPASSWORD="${POSTGRES_PASSWORD:-pixtral_pass}" \
+      psql "postgresql://pixtral_user@${DB_HOST}:${DB_PORT}/cases_db" -c "SELECT 1;" >/dev/null 2>&1; then
+    echo "✅ Postgres accepts SQL connections"
     break
   fi
   sleep 1
