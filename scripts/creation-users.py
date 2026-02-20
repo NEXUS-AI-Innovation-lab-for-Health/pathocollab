@@ -40,7 +40,7 @@ import requests
 DEFAULT_USERS = [
     {"email": "admin@gmail.com", "password": "adminadmin", "full_name": "Admin", "role": "admin"},
     {"email": "arthur@gmail.com", "password": "arthur1234", "full_name": "Dr. Arthur", "role": "anatomopathologiste"},
-    {"email": "louna@gmail.com", "password": "louna1234", "full_name": "Dr. Louna", "role": "anatomopathologiste"},
+    {"email": "louna@gmail.com", "password": "louna1234", "full_name": "Dr. Louna", "role": "radiologue"},
     {"email": "jack@gmail.com", "password": "jack1234", "full_name": "Dr. Jack", "role": "oncologue"},
 ]
 
