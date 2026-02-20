@@ -111,14 +111,6 @@ services:
     container_name: pixtral-qdrant
     ports:
       - "6333:6333"
-      - "6334:6334"
-    volumes:
-      - qdrant-data:/qdrant/storage
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:6333/healthz"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
     networks:
       - pixtral-network
 
@@ -232,14 +224,14 @@ services:
       dockerfile: Dockerfile
     container_name: pixtral-workflow-service
     environment:
-      SERVICE_PORT: "8005"
+      SERVICE_PORT: "8003"
       DATABASE_URL: postgresql+asyncpg://pixtral_user:pixtral_pass@postgres:5432/workflow_db
       # Optionnel: pour les notifications si tu en as besoin
       # NOTIFICATIONS_ENABLED: "true"
     depends_on:
       - postgres
     ports:
-      - "8005:8005"
+      - "8003:8003"
     networks:
       - pixtral-network
 
@@ -271,22 +263,20 @@ services:
       context: ../apps/reports-service
       dockerfile: Dockerfile
     container_name: pixtral-reports-service
-    ports:
-      - "8005:8005"
     environment:
-      DATABASE_URL: postgresql://pixtral_user:pixtral_pass@postgres:5432/reports_db
+      SERVICE_PORT: "8005"
+      DATABASE_URL: postgresql+asyncpg://pixtral_user:pixtral_pass@postgres:5432/reports_db
+      QDRANT_URL: http://qdrant:6333
+      WAIT_FOR_QDRANT: "true"
+      # si ton AI service utilise une clé :
+      # OPENAI_API_KEY: ${OPENAI_API_KEY}
     depends_on:
       - postgres
+      - qdrant
+    ports:
+      - "8005:8005"
     networks:
       - pixtral-network
-    volumes:
-      - ../apps/reports-service:/app
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8005/health"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 40s
 
   
 
