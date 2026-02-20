@@ -14,7 +14,7 @@ load_dotenv()
 # - DATABASE_URL doit être en postgresql+asyncpg://...
 DATABASE_URL = os.environ.get(
     "DATABASE_URL",
-    "postgresql+asyncpg://pixtral_user:pixtral_pass@localhost:5432/workflow_db",
+    "postgresql+asyncpg://pixtral_user:pixtral_pass@postgres:5432/workflow_db",
 )
 
 engine = create_async_engine(

@@ -231,24 +231,17 @@ services:
       context: ../apps/workflow-service
       dockerfile: Dockerfile
     container_name: pixtral-workflow-service
-    ports:
-      - "8003:8003"
     environment:
-      DATABASE_URL: postgresql://pixtral_user:pixtral_pass@postgres:5432/workflow_db
-      REDIS_URL: redis://redis:6379
+      SERVICE_PORT: "8005"
+      DATABASE_URL: postgresql+asyncpg://pixtral_user:pixtral_pass@postgres:5432/workflow_db
+      # Optionnel: pour les notifications si tu en as besoin
+      # NOTIFICATIONS_ENABLED: "true"
     depends_on:
       - postgres
-      - redis
+    ports:
+      - "8005:8005"
     networks:
       - pixtral-network
-    volumes:
-      - ../apps/workflow-service:/app
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8003/health"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 40s
 
   # Images Service (Port 8004) - Gestion des images médicales
   images-service:
