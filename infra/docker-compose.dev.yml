@@ -234,6 +234,7 @@ services:
     environment:
       SERVICE_PORT: "8002"
       DATABASE_URL: postgresql+asyncpg://pixtral_user:pixtral_pass@postgres:5432/cases_db
+      ALEMBIC_DATABASE_URL: postgresql+psycopg2://pixtral_user:pixtral_pass@postgres:5432/cases_db
     depends_on:
       - postgres
     ports:
@@ -250,6 +251,7 @@ services:
     environment:
       SERVICE_PORT: "8003"
       DATABASE_URL: postgresql+asyncpg://pixtral_user:pixtral_pass@postgres:5432/workflow_db
+      ALEMBIC_DATABASE_URL: postgresql+psycopg2://pixtral_user:pixtral_pass@postgres:5432/workflow_db
       # Optionnel: pour les notifications si tu en as besoin
       # NOTIFICATIONS_ENABLED: "true"
     depends_on:
@@ -268,6 +270,7 @@ services:
     environment:
       SERVICE_PORT: "8004"
       DATABASE_URL: postgresql+asyncpg://pixtral_user:pixtral_pass@postgres:5432/images_db
+      ALEMBIC_DATABASE_URL: postgresql+psycopg2://pixtral_user:pixtral_pass@postgres:5432/images_db
       MINIO_ENDPOINT: http://minio:9000
       MINIO_ACCESS_KEY: minioadmin
       MINIO_SECRET_KEY: minioadmin
@@ -290,6 +293,7 @@ services:
     environment:
       SERVICE_PORT: "8005"
       DATABASE_URL: postgresql+asyncpg://pixtral_user:pixtral_pass@postgres:5432/reports_db
+      ALEMBIC_DATABASE_URL: postgresql+psycopg2://pixtral_user:pixtral_pass@postgres:5432/reports_db
       QDRANT_URL: http://qdrant:6333
       WAIT_FOR_QDRANT: "true"
       # si ton AI service utilise une clé :
