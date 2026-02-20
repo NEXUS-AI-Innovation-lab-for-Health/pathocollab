@@ -199,25 +199,15 @@ services:
       context: ../apps/auth-service
       dockerfile: Dockerfile
     container_name: pixtral-auth-service
-    ports:
-      - "8001:8001"
     environment:
-      DATABASE_URL: postgresql://pixtral_user:pixtral_pass@postgres:5432/auth_db
-      SECRET_KEY: your-secret-key-here
-      ALGORITHM: HS256
-      ACCESS_TOKEN_EXPIRE_MINUTES: 30
+      DATABASE_URL: postgresql+asyncpg://pixtral_user:pixtral_pass@postgres:5432/auth_db
+      JWT_SECRET_KEY: super-secret-key
     depends_on:
       - postgres
+    ports:
+      - "8001:8001"
     networks:
       - pixtral-network
-    volumes:
-      - ../apps/auth-service:/app
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8001/health"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 40s
 
   # Cases Service (Port 8002) - Gestion des cas cliniques
   cases-service:
