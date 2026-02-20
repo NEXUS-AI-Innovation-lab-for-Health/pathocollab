@@ -185,22 +185,6 @@ services:
     networks:
       - pixtral-network
 
-
-  frontend:
-    build:
-      context: ../frontend
-      dockerfile: Dockerfile
-    container_name: pixtral-frontend
-    environment:
-      # selon ton app, souvent REACT_APP_API_URL
-      REACT_APP_API_URL: http://localhost:8000
-    depends_on:
-      - backend-gateway
-    ports:
-      - "3000:3000"
-    networks:
-      - pixtral-network
-
   # Backend Gateway (Port 8000) - Point d'entrée unique pour le frontend
   backend-gateway:
     build:
