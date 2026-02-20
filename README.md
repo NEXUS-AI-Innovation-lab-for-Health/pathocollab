@@ -84,65 +84,22 @@ infra/
 | **Python** | ≥ 3.11 | [python.org](https://www.python.org/) |
 | **Yarn** | ≥ 1.22 | `npm install -g yarn` |
 
-### Installation (3 étapes)
-
-#### 1️⃣ Cloner et installer les dépendances
+### Installation 
 
 ```bash
 # Cloner le repository
 git clone https://github.com/NEXUS-AI-Innovation-lab-for-Health/pathocollab.git
 cd pathocollab
 
-# Installer les dépendances backend
-cd apps/auth-service && py -m pip install -r requirements.txt && cd ../..
-cd apps/cases-service && py -m pip install -r requirements.txt && cd ../..
-cd apps/workflow-service && py -m pip install -r requirements.txt && cd ../..
-cd apps/images-service && py -m pip install -r requirements.txt && cd ../..
-cd apps/reports-service && py -m pip install -r requirements.txt && cd ../..
+# Build les images du docker
+docker compose -f infra/docker-compose.dev.yml up -d --build
 
 # Installer les dépendances frontend
-cd apps/web && yarn install && cd ../..
-```
+cd frontend
+npm install --legacy-peer-deps
 
-#### 2️⃣ Démarrer l'infrastructure
-
-```bash
-cd infra
-docker compose -f docker-compose.dev.yml up -d
-cd ..
-
-# Attendre que les services soient prêts (30 secondes)
-sleep 30
-```
-
-### ▶️ Démarrer les services
-
-**Option A : Script automatique (recommandé)**
-
-```bash
-bash scripts/start-all-services.sh
-```
-
-**Option B : Manuel (terminaux séparés)**
-
-```bash
-# Terminal 1 - Auth Service
-cd apps/auth-service && uvicorn app.main:app --host 0.0.0.0 --port 8001 --reload
-
-# Terminal 2 - Cases Service
-cd apps/cases-service && uvicorn app.main:app --host 0.0.0.0 --port 8002 --reload
-
-# Terminal 3 - Workflow Service
-cd apps/workflow-service && uvicorn app.main:app --host 0.0.0.0 --port 8003 --reload
-
-# Terminal 4 - Images Service
-cd apps/images-service && uvicorn app.main:app --host 0.0.0.0 --port 8004 --reload
-
-# Terminal 5 - Reports Service
-cd apps/reports-service && uvicorn app.main:app --host 0.0.0.0 --port 8005 --reload
-
-# Terminal 6 - Frontend
-cd apps/web && yarn start
+# Lancer le Frontend
+npm start
 ```
 
 ### 🌐 Accéder à l'application
@@ -168,16 +125,25 @@ curl http://localhost:8002/health  # Cases Service
 curl http://localhost:8003/health  # Workflow Service
 curl http://localhost:8004/health  # Images Service
 curl http://localhost:8005/health  # Reports Service
+```
 
-# Créer un utilisateur
-curl -X POST http://localhost:8001/api/auth/register \
-  -H "Content-Type: application/json" \
-  -d '{
-    "email": "test@pixtral.fr",
-    "password": "testpass123",
-    "full_name": "Dr. Test",
-    "role": "anatomopathologiste"
-  }'
+### 🧪 Utilisateurs Authentification
+```bash
+[ADMIN]
+ID (email) : admin@gmail.com
+PASSWORD : adminadmin
+
+[ANATOMOPATHOLOGISTE]
+ID (email) : arthur@gmail.com
+PASSWORD : arthur1234
+
+[RADIOLOGUE]
+ID (email) : louna@gmail.com
+PASSWORD : louna1234
+
+[ONCOLOGUE]
+ID (email) : jack@gmail.com
+PASSWORD : jack1234
 ```
 
 ---
@@ -227,15 +193,6 @@ auth-service/
   - Migrations DB
   - Healthchecks
 
-### Déploiement
-
-```bash
-# Build des images
-docker-compose -f infra/docker-compose.prod.yml build
-
-# Démarrage production
-docker-compose -f infra/docker-compose.prod.yml up -d
-```
 
 ## Sécurité & RGPD
 
@@ -244,25 +201,6 @@ docker-compose -f infra/docker-compose.prod.yml up -d
 - Audit log complet (toutes les actions tracées)
 - Conformité FHIR pour interopérabilité
 - Backup régulier des bases de données
-
-## Tests
-
-```bash
-# Tests unitaires backend
-cd apps/auth-service && pytest --cov=app tests/
-
-# Tests frontend
-cd apps/web && yarn test
-
-# Tests d'intégration
-pytest tests/integration/
-```
-
-## Monitoring
-
-- **Prometheus**: Métriques (CPU, RAM, latence HTTP)
-- **Grafana**: Dashboards temps réel
-- Logs centralisés via stdout (parsés par Docker/K8s)
 
 ## Contribution
 
