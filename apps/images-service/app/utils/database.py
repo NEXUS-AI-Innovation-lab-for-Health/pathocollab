@@ -6,7 +6,7 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-DATABASE_URL = os.environ.get("DATABASE_URL", "postgresql+asyncpg://pixtral_user:pixtral_pass@localhost:5432/images_db")
+DATABASE_URL = os.environ.get("DATABASE_URL", "postgresql+asyncpg://pixtral_user:pixtral_pass@postgres:5432/images_db")
 
 
 engine = create_engine(DATABASE_URL, pool_pre_ping=True, pool_size=10, max_overflow=20)

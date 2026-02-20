@@ -215,26 +215,15 @@ services:
       context: ../apps/cases-service
       dockerfile: Dockerfile
     container_name: pixtral-cases-service
-    ports:
-      - "8002:8002"
     environment:
-      DATABASE_URL: postgresql://pixtral_user:pixtral_pass@postgres:5432/cases_db
-      MINIO_ENDPOINT: minio:9000
-      MINIO_ACCESS_KEY: minioadmin
-      MINIO_SECRET_KEY: minioadmin
+      SERVICE_PORT: "8002"
+      DATABASE_URL: postgresql+asyncpg://pixtral_user:pixtral_pass@postgres:5432/cases_db
     depends_on:
       - postgres
-      - minio
+    ports:
+      - "8002:8002"
     networks:
       - pixtral-network
-    volumes:
-      - ../apps/cases-service:/app
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8002/health"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 40s
 
   # Workflow Service (Port 8003) - Gestion des workflows collaboratifs
   workflow-service:
@@ -261,6 +250,28 @@ services:
       retries: 3
       start_period: 40s
 
+  # Images Service (Port 8004) - Gestion des images médicales
+  images-service:
+    build:
+      context: ../apps/images-service
+      dockerfile: Dockerfile
+    container_name: pixtral-images-service
+    environment:
+      SERVICE_PORT: "8004"
+      DATABASE_URL: postgresql+asyncpg://pixtral_user:pixtral_pass@postgres:5432/images_db
+      MINIO_ENDPOINT: http://minio:9000
+      MINIO_ACCESS_KEY: minioadmin
+      MINIO_SECRET_KEY: minioadmin
+      MINIO_BUCKET_IMAGES: pixtral-images
+      MINIO_BUCKET_WSI: pixtral-wsi-images
+    depends_on:
+      - postgres
+      - minio
+    ports:
+      - "8004:8004"
+    networks:
+      - pixtral-network
+
   # Reports Service (Port 8005) - Gestion des rapports médicaux
   reports-service:
     build:
@@ -284,33 +295,7 @@ services:
       retries: 3
       start_period: 40s
 
-  # Images Service (Port 8004) - Gestion des images médicales
-  images-service:
-    build:
-      context: ../apps/images-service
-      dockerfile: Dockerfile
-    container_name: pixtral-images-service
-    ports:
-      - "8004:8004"
-    environment:
-      DATABASE_URL: postgresql://pixtral_user:pixtral_pass@postgres:5432/images_db
-      MINIO_ENDPOINT: minio:9000
-      MINIO_ACCESS_KEY: minioadmin
-      MINIO_SECRET_KEY: minioadmin
-      MINIO_BUCKET_NAME: pixtral-images
-    depends_on:
-      - postgres
-      - minio
-    networks:
-      - pixtral-network
-    volumes:
-      - ../apps/images-service:/app
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8004/health"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 40s
+  
 
 volumes:
   redis-data:
