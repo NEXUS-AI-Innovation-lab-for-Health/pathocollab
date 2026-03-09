@@ -1,7 +1,7 @@
 from sqlalchemy import Column, Date, String, Integer, DateTime, Text
 from sqlalchemy.ext.declarative import declarative_base
 from pydantic import BaseModel, Field
-from typing import Optional
+from typing import Any, Dict, List, Optional
 from datetime import date, datetime, timezone
 import uuid
 
@@ -43,3 +43,29 @@ class PatientCreate(BaseModel):
     symptoms: Optional[str] = None
     imaging_notes: Optional[str] = None
     date_of_birth: Optional[date] = None
+
+
+class OlgaField(BaseModel):
+    field_hint: Optional[str] = ""
+    field_required: bool = False
+    unique_id: str
+    field_key: str
+    field_events: Optional[Dict[str, Any]] = {}
+    field_mode: Optional[str] = "edit"
+    field_label: Optional[str] = ""
+    field_type: str
+
+
+class OlgaFormSchema(BaseModel):
+    form_version: str
+    models: List[str]
+    form_label: str
+    last_updated: str
+    form: List[OlgaField]
+    form_category: str
+    form_id: str
+
+
+class DynamicFormSubmission(BaseModel):
+    form_id: str
+    data: Dict[str, Any]

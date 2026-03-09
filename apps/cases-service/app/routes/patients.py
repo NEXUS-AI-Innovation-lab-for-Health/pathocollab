@@ -1,9 +1,11 @@
+import datetime
+
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from typing import List
 
-from app.models.patient import Patient, PatientCreate, PatientDB
+from app.models.patient import Patient, PatientCreate, PatientDB, DynamicFormSubmission
 from app.utils.database import get_db
 
 router = APIRouter(prefix="/patients", tags=["Patients"])
@@ -67,3 +69,39 @@ async def delete_all_patients(db: AsyncSession = Depends(get_db)):
     await db.execute(delete(PatientDB))
     await db.commit()
     return {"detail": "All patients deleted"}
+
+
+@router.post("/from-form")
+async def create_patient_from_dynamic_form(payload: DynamicFormSubmission):
+    if payload.form_id != "PatientCreation":
+        raise HTTPException(status_code=400, detail="Formulaire non supporté")
+
+    data = payload.data
+
+    required_fields = ["id", "nom", "prenom", "age", "naissance", "sexe"]
+    missing = [field for field in required_fields if not data.get(field)]
+
+    if missing:
+        raise HTTPException(
+            status_code=422,
+            detail=f"Champs obligatoires manquants: {', '.join(missing)}"
+        )
+
+    patient = {
+        "id": data["id"],
+        "nom": data["nom"],
+        "prenom": data["prenom"],
+        "age": data["age"],
+        "naissance": data["naissance"],
+        "sexe": data["sexe"],
+        "historique": data.get("historique", ""),
+        "symptome": data.get("symptome", ""),
+        "notes": data.get("notes", ""),
+        "created_at": datetime.utcnow().isoformat()
+    }
+
+    # Ici tu remplaceras par un vrai save BDD
+    return {
+        "message": "Patient créé avec succès",
+        "patient": patient
+    }

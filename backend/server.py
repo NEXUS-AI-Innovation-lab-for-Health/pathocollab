@@ -10,9 +10,9 @@ from fastapi.middleware.cors import CORSMiddleware
 # -----------------------------------------------------------------------------
 AUTH_SERVICE_URL = os.getenv("AUTH_SERVICE_URL", "http://auth-service:8001")
 CASES_SERVICE_URL = os.getenv("CASES_SERVICE_URL", "http://cases-service:8002")
-IMAGES_SERVICE_URL = os.getenv("IMAGES_SERVICE_URL", "http://images-service:8003")
+IMAGES_SERVICE_URL = os.getenv("WORKFLOW_SERVICE_URL", "http://workflow-service:8003")
 REPORTS_SERVICE_URL = os.getenv("REPORTS_SERVICE_URL", "http://reports-service:8004")
-WORKFLOW_SERVICE_URL = os.getenv("WORKFLOW_SERVICE_URL", "http://workflow-service:8005")
+WORKFLOW_SERVICE_URL = os.getenv("IMAGES_SERVICE_URL", "http://images-service:8005")
 
 # CORS
 CORS_ORIGINS = os.getenv("CORS_ORIGINS", "*")
@@ -62,12 +62,12 @@ def _pick_upstream(path: str) -> str:
     """
     Mappe un chemin API gateway -> URL du service cible.
     Règles (à adapter si besoin) :
-      /api/auth/*        -> auth-service
-      /api/cases/*       -> cases-service
-      /api/patients/*    -> cases-service
-      /api/images/*      -> images-service
-      /api/reports/*     -> reports-service
-      /api/workflow/*    -> workflow-service
+        /api/auth/*        -> auth-service
+        /api/cases/*       -> cases-service
+        /api/patients/*    -> cases-service
+        /api/images/*      -> images-service
+        /api/reports/*     -> reports-service
+        /api/workflow/*    -> workflow-service
     """
     if path.startswith("/api/auth"):
         return AUTH_SERVICE_URL
