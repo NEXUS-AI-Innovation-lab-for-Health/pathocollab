@@ -1,12 +1,16 @@
-from sqlalchemy import Column, String, DateTime, Boolean, Text, Enum as SQLEnum
-from sqlalchemy.ext.declarative import declarative_base
-from pydantic import BaseModel
-from typing import Optional
-from datetime import datetime, timezone
-import uuid
-import enum
+from __future__ import annotations
 
-Base = declarative_base()
+import enum
+import uuid
+from datetime import datetime, timezone
+from typing import Optional
+
+from pydantic import BaseModel, ConfigDict
+from sqlalchemy import Boolean, DateTime, Enum as SQLEnum, String, Text
+from sqlalchemy.orm import Mapped, mapped_column
+
+from app.models.base import Base
+
 
 class NotificationType(str, enum.Enum):
     CASE_ASSIGNED = "case_assigned"
@@ -15,39 +19,46 @@ class NotificationType(str, enum.Enum):
     SPECIALIST_REQUESTED = "specialist_requested"
     COMMENT_ADDED = "comment_added"
 
+
 class NotificationDB(Base):
     __tablename__ = "notifications"
-    
-    id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
-    user_id = Column(String, nullable=False, index=True)
-    case_id = Column(String, nullable=False, index=True)
-    type = Column(SQLEnum(NotificationType), nullable=False)
-    title = Column(String, nullable=False)
-    message = Column(Text, nullable=False)
-    is_read = Column(Boolean, default=False)
-    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
-    
-    # Convertir l'UUID en string lors de la récupération depuis la base
-    @property
-    def id_str(self):
-        return str(self.id) if self.id else None
 
-class Notification(BaseModel):
-    id: str
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
+    user_id: Mapped[str] = mapped_column(String, nullable=False, index=True)
+    case_id: Mapped[str] = mapped_column(String, nullable=False, index=True)
+    type: Mapped[NotificationType] = mapped_column(SQLEnum(NotificationType, name="notification_type"), nullable=False)
+    title: Mapped[str] = mapped_column(String, nullable=False)
+    message: Mapped[str] = mapped_column(Text, nullable=False)
+    is_read: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False
+    )
+
+
+class NotificationBase(BaseModel):
     user_id: str
     case_id: str
     type: NotificationType
     title: str
     message: str
+
+
+class NotificationCreate(NotificationBase):
+    pass
+
+
+class Notification(NotificationBase):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: str
     is_read: bool = False
     created_at: datetime
-    
-    class Config:
-        from_attributes = True
 
-class NotificationCreate(BaseModel):
-    user_id: str
-    case_id: str
-    type: NotificationType
-    title: str
+
+class NotificationReadResponse(BaseModel):
     message: str
+
+
+class NotificationListResponse(BaseModel):
+    items: list[Notification]
+    total: Optional[int] = None

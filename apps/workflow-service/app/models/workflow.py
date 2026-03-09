@@ -1,68 +1,142 @@
-from sqlalchemy import Column, String, DateTime, Integer, Text, Boolean
-from sqlalchemy.ext.declarative import declarative_base
-from pydantic import BaseModel, validator, Field
-from typing import Optional, List, Union
-from datetime import datetime, timezone
-import uuid
-import json
+from __future__ import annotations
 
-Base = declarative_base()
+import enum
+import json
+import uuid
+from datetime import datetime, timezone
+from typing import Any, Optional
+
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from sqlalchemy import Boolean, DateTime, Integer, String, Text
+from sqlalchemy.orm import Mapped, mapped_column
+
+from app.models.base import Base
+
+
+class WorkflowEngine(str, enum.Enum):
+    LOCAL = "local"
+    OLGA = "olga"
+
 
 class WorkflowDB(Base):
     __tablename__ = "workflows"
-    
-    id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
-    case_id = Column(String, nullable=False, index=True)
-    specialists_order = Column(Text, nullable=False)  # Stocké sous forme de chaîne JSON
-    current_step = Column(Integer, default=0)
-    is_completed = Column(Boolean, default=False)
-    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
-    updated_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
-    completed_at = Column(DateTime(timezone=True), nullable=True)
 
-    def to_dict(self):
-        return {
-            'id': self.id,
-            'case_id': self.case_id,
-            'specialists_order': json.loads(self.specialists_order) if self.specialists_order else [],
-            'current_step': self.current_step,
-            'is_completed': self.is_completed,
-            'created_at': self.created_at,
-            'completed_at': self.completed_at
-        }
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
+    case_id: Mapped[str] = mapped_column(String, nullable=False, index=True, unique=True)
+    specialists_order: Mapped[str] = mapped_column(Text, nullable=False, default="[]")
+    current_step: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    workflow_engine: Mapped[str] = mapped_column(String, nullable=False, default=WorkflowEngine.LOCAL.value)
+    olga_workflow_code: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    olga_session_id: Mapped[Optional[str]] = mapped_column(String, nullable=True, index=True)
+    olga_status: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    is_completed: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(timezone.utc),
+        onupdate=lambda: datetime.now(timezone.utc),
+        nullable=False,
+    )
+    completed_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    def specialists_as_list(self) -> list[str]:
+        if not self.specialists_order:
+            return []
+        try:
+            value = json.loads(self.specialists_order)
+            return value if isinstance(value, list) else []
+        except json.JSONDecodeError:
+            return []
+
 
 class WorkflowBase(BaseModel):
     case_id: str
-    specialists_order: List[str]
-    
-    @validator('specialists_order', pre=True)
-    def parse_specialists_order(cls, v):
-        if isinstance(v, str):
+    specialists_order: list[str] = Field(default_factory=list)
+    workflow_engine: WorkflowEngine = WorkflowEngine.LOCAL
+    olga_workflow_code: Optional[str] = None
+
+    @field_validator("specialists_order", mode="before")
+    @classmethod
+    def parse_specialists_order(cls, value: Any) -> list[str]:
+        if value is None:
+            return []
+        if isinstance(value, list):
+            return [str(item).strip() for item in value if str(item).strip()]
+        if isinstance(value, str):
+            raw = value.strip()
+            if not raw:
+                return []
             try:
-                return json.loads(v)
+                parsed = json.loads(raw)
+                if isinstance(parsed, list):
+                    return [str(item).strip() for item in parsed if str(item).strip()]
             except json.JSONDecodeError:
-                return v.split(',')
-        return v
+                pass
+            return [item.strip() for item in raw.split(",") if item.strip()]
+        raise ValueError("specialists_order doit être une liste ou une chaîne JSON valide")
+
 
 class WorkflowCreate(WorkflowBase):
-    pass
+    @model_validator(mode="after")
+    def validate_mode(self) -> "WorkflowCreate":
+        if self.workflow_engine == WorkflowEngine.LOCAL and not self.specialists_order:
+            raise ValueError("specialists_order est obligatoire pour un workflow local")
+        if self.workflow_engine == WorkflowEngine.OLGA and not self.olga_workflow_code:
+            raise ValueError("olga_workflow_code est obligatoire pour un workflow Olga")
+        return self
 
-class Workflow(WorkflowBase):
+
+class WorkflowUpdate(BaseModel):
+    specialists_order: Optional[list[str]] = None
+    current_step: Optional[int] = None
+    is_completed: Optional[bool] = None
+    olga_status: Optional[str] = None
+
+
+class Workflow(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
     id: str
+    case_id: str
+    specialists_order: list[str] = Field(default_factory=list)
     current_step: int = 0
+    workflow_engine: WorkflowEngine = WorkflowEngine.LOCAL
+    olga_workflow_code: Optional[str] = None
+    olga_session_id: Optional[str] = None
+    olga_status: Optional[str] = None
     is_completed: bool = False
     created_at: datetime
-    updated_at: Optional[datetime] = None
+    updated_at: datetime
     completed_at: Optional[datetime] = None
-    
-    class Config:
-        from_attributes = True
-        json_encoders = {
-            datetime: lambda v: v.isoformat() if v else None
-        }
-        
+
+    @model_validator(mode="before")
     @classmethod
-    def from_orm(cls, obj):
-        if hasattr(obj, 'to_dict'):
-            return cls(**obj.to_dict())
-        return super().from_orm(obj)
+    def normalize_from_orm(cls, value: Any) -> Any:
+        if isinstance(value, WorkflowDB):
+            return {
+                "id": value.id,
+                "case_id": value.case_id,
+                "specialists_order": value.specialists_as_list(),
+                "current_step": value.current_step,
+                "workflow_engine": value.workflow_engine,
+                "olga_workflow_code": value.olga_workflow_code,
+                "olga_session_id": value.olga_session_id,
+                "olga_status": value.olga_status,
+                "is_completed": value.is_completed,
+                "created_at": value.created_at,
+                "updated_at": value.updated_at,
+                "completed_at": value.completed_at,
+            }
+        return value
+
+
+class OlgaTaskCompleteRequest(BaseModel):
+    data: dict[str, Any] = Field(default_factory=dict)
+
+
+class OlgaTasksResponse(BaseModel):
+    workflow_id: str
+    session_id: str
+    tasks: list[dict[str, Any]]

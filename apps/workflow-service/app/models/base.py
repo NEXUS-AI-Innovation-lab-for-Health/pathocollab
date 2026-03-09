@@ -1,5 +1,5 @@
-from sqlalchemy import create_engine, MetaData
-from sqlalchemy.ext.declarative import declarative_base
+from sqlalchemy.orm import DeclarativeBase
 
-Base = declarative_base()
-metadata = MetaData()
+
+class Base(DeclarativeBase):
+    pass
