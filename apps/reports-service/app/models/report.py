@@ -2,13 +2,12 @@ from __future__ import annotations
 
 import uuid
 from datetime import datetime, timezone
-from typing import Optional, List
+from typing import Optional
 
 from pydantic import BaseModel
 from sqlalchemy import Boolean, Column, DateTime, String, Text
-from sqlalchemy.ext.declarative import declarative_base
 
-Base = declarative_base()
+from .base import Base
 
 
 class ReportDB(Base):
@@ -19,12 +18,13 @@ class ReportDB(Base):
     user_id = Column(String, nullable=False)
     title = Column(String, nullable=False)
     content = Column(Text, nullable=False)
-    is_final = Column(Boolean, default=False)
-    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+    is_final = Column(Boolean, default=False, nullable=False)
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False)
     updated_at = Column(
         DateTime(timezone=True),
         default=lambda: datetime.now(timezone.utc),
         onupdate=lambda: datetime.now(timezone.utc),
+        nullable=False,
     )
 
 
@@ -51,17 +51,13 @@ class ReportCreate(BaseModel):
 
 
 class ReportUpdate(BaseModel):
-    # Tout optionnel pour permettre PATCH/PUT partiel côté front
     title: Optional[str] = None
     content: Optional[str] = None
     is_final: Optional[bool] = None
 
 
 class ReportAssistRequest(BaseModel):
-    # ✅ utilisé par /reports/assist pour savoir quel report mettre à jour
     report_id: str
-
-    # Contexte (optionnel)
     case_id: Optional[str] = None
     user_id: Optional[str] = None
     annotations: list = []

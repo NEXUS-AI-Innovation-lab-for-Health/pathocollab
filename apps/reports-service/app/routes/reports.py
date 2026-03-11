@@ -10,6 +10,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.report import Report, ReportCreate, ReportUpdate, ReportDB, ReportAssistRequest
 from app.utils.database import get_db
 
+import logging
+
+logger = logging.getLogger(__name__)
+
 router = APIRouter(prefix="/reports", tags=["Reports"])
 
 
@@ -21,7 +25,7 @@ async def create_report(report_data: ReportCreate, db: AsyncSession = Depends(ge
             user_id=report_data.user_id,
             title=report_data.title,
             content=report_data.content,
-            is_final=getattr(report_data, "is_final", False),
+            is_final=report_data.is_final,
             created_at=datetime.now(timezone.utc),
             updated_at=datetime.now(timezone.utc),
         )
@@ -29,13 +33,13 @@ async def create_report(report_data: ReportCreate, db: AsyncSession = Depends(ge
         await db.commit()
         await db.refresh(db_report)
 
-        # Pydantic v2
         if hasattr(Report, "model_validate"):
             return Report.model_validate(db_report)
         return Report.from_orm(db_report)  # type: ignore[attr-defined]
 
     except Exception as e:
         await db.rollback()
+        logger.exception("Erreur création report")
         raise HTTPException(status_code=500, detail=f"Erreur création report: {e}")
 
 

@@ -40,9 +40,6 @@ import {
 
 const IMAGES_API = process.env.REACT_APP_IMAGES_API?.trim() || `${window.location.protocol}//${window.location.hostname}:8004`;
 
-const OSD_PREFIX_URL = `${IMAGES_API}/api/wsi/openseadragon-images/`;
-
-
 type SourceType = "dzi" | "image";
 type DrawTool = AnnotationType;
 type Severity = NonNullable<BaseAnnotation["severity"]>;
@@ -207,7 +204,7 @@ export default function OpenSeadragonUrlViewer(
 
     const viewer = OpenSeadragon({
       element: containerRef.current,
-      prefixUrl: OSD_PREFIX_URL,
+      prefixUrl: `${window.location.origin}/assets/openseadragon-images/`,
       showNavigator: true,
       tileSources,
     });

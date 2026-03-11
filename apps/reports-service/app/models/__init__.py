@@ -1,4 +1,4 @@
 from .base import Base
-from .report import Report
+from .report import Report, ReportDB, ReportCreate, ReportUpdate, ReportAssistRequest
 
-__all__ = ["Base", "Report"]
+__all__ = ["Base", "Report", "ReportDB", "ReportCreate", "ReportUpdate", "ReportAssistRequest"]
