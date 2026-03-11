@@ -116,13 +116,17 @@ const Dashboard = () => {
 
       const notificationsData = Array.isArray(response.data)
         ? response.data
-        : Array.isArray(response.data?.notifications)
-          ? response.data.notifications
-          : [];
+        : Array.isArray(response.data?.items)
+          ? response.data.items
+          : Array.isArray(response.data?.notifications)
+            ? response.data.notifications
+            : [];
 
       setNotifications(notificationsData);
       setUnreadCount(
-        notificationsData.filter((n) => !n.is_read).length,
+        typeof response.data?.unread_count === "number"
+          ? response.data.unread_count
+          : notificationsData.filter((n) => !n.is_read).length
       );
     } catch (error) {
       console.error("Erreur lors de la récupération des notifications:", error);

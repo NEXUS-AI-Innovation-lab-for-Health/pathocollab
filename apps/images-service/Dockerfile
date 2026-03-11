@@ -13,6 +13,12 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     postgresql-client \
     && rm -rf /var/lib/apt/lists/*
 
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    libvips-tools \
+    libvips42 \
+    && rm -rf /var/lib/apt/lists/*
+
+
 # Dépendances Python (cache docker efficace)
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
