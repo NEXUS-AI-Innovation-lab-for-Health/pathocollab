@@ -267,26 +267,6 @@ ${reportData.conclusion || "Aucune conclusion"}
             "Le workflow n'a pas pu être mis à jour automatiquement",
           );
         }
-
-        // Mettre à jour le statut du cas
-        try {
-          await axios.patch(
-            `${CASES_API}/api/cases/${caseId}/status?status=in_progress`,
-            {},
-            {
-              headers: {
-                "Content-Type": "application/json",
-                Authorization: `Bearer ${localStorage.getItem("access_token")}`,
-              },
-            },
-          );
-          console.log("Statut du cas mis à jour avec succès");
-        } catch (statusError) {
-          console.error("Error updating case status:", statusError);
-          console.warn(
-            "Le statut du cas n'a pas pu être mis à jour automatiquement",
-          );
-        }
       }
     } catch (error) {
       console.error("Error saving report:", error);

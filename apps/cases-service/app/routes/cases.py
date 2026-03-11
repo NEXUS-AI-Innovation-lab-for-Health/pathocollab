@@ -5,9 +5,70 @@ from typing import List
 
 from app.models.case import Case, CaseCreate, CaseDB, CaseStatus
 from app.utils.database import get_db
+import os
+from datetime import datetime, timezone
+
+import httpx
 
 router = APIRouter(prefix="/cases", tags=["Cases"])
 
+
+REPORTS_SERVICE_URL = os.getenv("REPORTS_SERVICE_URL", "http://reports-service:8005")
+
+
+def _normalize_identity(value: str | None) -> str:
+    return (value or "").strip().lower()
+
+
+async def _extract_reports_for_case(case_id: str) -> list[dict]:
+    async with httpx.AsyncClient(timeout=10.0) as client:
+        response = await client.get(f"{REPORTS_SERVICE_URL}/api/reports/case/{case_id}")
+        response.raise_for_status()
+        data = response.json()
+
+    if isinstance(data, list):
+        return data
+
+    if isinstance(data, dict):
+        if isinstance(data.get("items"), list):
+            return data["items"]
+        if isinstance(data.get("reports"), list):
+            return data["reports"]
+
+    return []
+
+
+async def _sync_case_completion(db: AsyncSession, db_case: CaseDB) -> CaseDB:
+    assigned_specialists = db_case.assigned_specialists or []
+    assigned_set = {
+        _normalize_identity(value)
+        for value in assigned_specialists
+        if value
+    }
+
+    if not assigned_set:
+        return db_case
+
+    try:
+        reports = await _extract_reports_for_case(db_case.id)
+    except Exception:
+        # On ne bloque pas le service des cas si reports-service est indisponible
+        return db_case
+
+    final_report_users = {
+        _normalize_identity(report.get("user_id"))
+        for report in reports
+        if report.get("is_final") is True and report.get("user_id")
+    }
+
+    if assigned_set.issubset(final_report_users):
+        if db_case.status != CaseStatus.COMPLETED:
+            db_case.status = CaseStatus.COMPLETED
+            db_case.completed_at = datetime.now(timezone.utc)
+            await db.commit()
+            await db.refresh(db_case)
+
+    return db_case
 
 def get_db_override():
     raise RuntimeError("get_db not injected")
@@ -60,6 +121,8 @@ async def get_case(case_id: str, db: AsyncSession = Depends(get_db)):
     case = result.scalar_one_or_none()
     if not case:
         raise HTTPException(status_code=404, detail="Case not found")
+
+    case = await _sync_case_completion(db, case)
     return _to_case_response(case)
 
 
@@ -86,3 +149,19 @@ async def delete_case(case_id: str, db: AsyncSession = Depends(get_db)):
     await db.delete(case)
     await db.commit()
     return {"detail": "Case deleted", "id": case_id}
+
+
+@router.post("/{case_id}/sync-completion")
+async def sync_case_completion(case_id: str, db: AsyncSession = Depends(get_db)):
+    result = await db.execute(select(CaseDB).where(CaseDB.id == case_id))
+    case = result.scalar_one_or_none()
+    if not case:
+        raise HTTPException(status_code=404, detail="Case not found")
+
+    case = await _sync_case_completion(db, case)
+
+    return {
+        "case_id": case.id,
+        "status": case.status,
+        "completed_at": case.completed_at,
+    }

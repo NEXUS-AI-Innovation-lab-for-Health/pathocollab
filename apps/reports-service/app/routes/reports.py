@@ -10,12 +10,31 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.report import Report, ReportCreate, ReportUpdate, ReportDB, ReportAssistRequest
 from app.utils.database import get_db
 
+import os
+import httpx
+
 import logging
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/reports", tags=["Reports"])
 
+CASES_SERVICE_URL = os.getenv("CASES_SERVICE_URL", "http://cases-service:8002")
+
+
+async def _sync_case_completion(case_id: str) -> None:
+    async with httpx.AsyncClient(timeout=10.0) as client:
+        response = await client.post(f"{CASES_SERVICE_URL}/api/cases/{case_id}/sync-completion")
+        response.raise_for_status()
+
+
+async def _sync_case_completion_if_final(is_final: bool, case_id: str) -> None:
+    if not is_final:
+        return
+    try:
+        await _sync_case_completion(case_id)
+    except Exception:
+        logger.exception("Erreur sync-completion pour le cas %s", case_id)
 
 @router.post("/", response_model=Report, status_code=201)
 async def create_report(report_data: ReportCreate, db: AsyncSession = Depends(get_db)) -> Report:
@@ -32,6 +51,8 @@ async def create_report(report_data: ReportCreate, db: AsyncSession = Depends(ge
         db.add(db_report)
         await db.commit()
         await db.refresh(db_report)
+
+        await _sync_case_completion_if_final(db_report.is_final, db_report.case_id)
 
         if hasattr(Report, "model_validate"):
             return Report.model_validate(db_report)
@@ -86,8 +107,6 @@ async def get_report(report_id: str, db: AsyncSession = Depends(get_db)) -> Repo
 
 
 
-
-
 @router.delete("/{report_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_report(report_id: str, db: AsyncSession = Depends(get_db)) -> Response:
     """Supprime un rapport."""
@@ -106,16 +125,16 @@ async def delete_report(report_id: str, db: AsyncSession = Depends(get_db)) -> R
     except Exception as e:
         await db.rollback()
         raise HTTPException(status_code=500, detail=f"Erreur suppression report: {e}")
+
+
 @router.put("/{report_id}", response_model=Report)
 async def update_report(report_id: str, payload: ReportUpdate, db: AsyncSession = Depends(get_db)) -> Report:
-    """Met à jour un rapport existant (utilisé par le front)."""
     try:
         result = await db.execute(select(ReportDB).where(ReportDB.id == report_id))
         report = result.scalars().first()
         if not report:
             raise HTTPException(status_code=404, detail="Report introuvable")
 
-        # Mise à jour partielle
         if payload.title is not None:
             report.title = payload.title
         if payload.content is not None:
@@ -128,6 +147,8 @@ async def update_report(report_id: str, payload: ReportUpdate, db: AsyncSession 
         db.add(report)
         await db.commit()
         await db.refresh(report)
+
+        await _sync_case_completion_if_final(report.is_final, report.case_id)
 
         if hasattr(Report, "model_validate"):
             return Report.model_validate(report)

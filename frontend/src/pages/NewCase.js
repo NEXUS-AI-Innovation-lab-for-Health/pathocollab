@@ -170,7 +170,7 @@ const NewCase = () => {
         description,
         status: "pending",
         created_by: userName,
-        assigned_specialists: selectedSpecialists.map((s) => s.name),
+        assigned_specialists: selectedSpecialists.map((s) => s.email),
       };
 
       const response = await axios.post(
