@@ -1,11 +1,30 @@
 export type AnnotationType = "rect" | "circle" | "polygon";
+export type Severity = "Faible" | "Moyenne" | "Élevée";
+export type AnnotationCategory =
+    | "Zone suspecte"
+    | "Nécrose"
+    | "Inflammation"
+    | "Tumeur"
+    | "Artefact"
+    | "Autre";
 
 export interface BaseAnnotation {
     id: string;
     type: AnnotationType;
+
     label?: string | null;
-    severity?: "Faible" | "Moyenne" | "Élevée";
+    category?: AnnotationCategory | null;
+    severity?: Severity;
+    description?: string | null;
+    recommendation?: string | null;
+    tags?: string[];
+
+    ownerId?: string | null;
+    ownerName?: string | null;
+
     createdAt: string;
+    updatedAt?: string | null;
+
     _source?: "api" | "local" | "ia";
 }
 

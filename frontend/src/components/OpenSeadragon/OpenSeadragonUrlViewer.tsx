@@ -12,6 +12,7 @@ import {
 import type {
   Annotation,
   AnnotationType,
+  AnnotationCategory,
   CircleAnnotation,
   RectAnnotation,
   PolygonAnnotation,
@@ -38,7 +39,9 @@ import {
   polygonCancel,
 } from "./drawPolygon";
 
-const IMAGES_API = process.env.REACT_APP_IMAGES_API?.trim() || `${window.location.protocol}//${window.location.hostname}:8004`;
+const IMAGES_API =
+  process.env.REACT_APP_IMAGES_API?.trim() ||
+  `${window.location.protocol}//${window.location.hostname}:8004`;
 
 type SourceType = "dzi" | "image";
 type DrawTool = AnnotationType;
@@ -53,7 +56,6 @@ export type OpenSeadragonUrlViewerProps = {
 };
 
 type DragRefState = (RectDragState | CircleDragState) & {
-  // drawPolygon ajoute dragRef.current.polygon de manière dynamique
   polygon?: any;
 };
 
@@ -64,8 +66,16 @@ type ApiAnnotationRow = {
   type: AnnotationType;
   label?: string | null;
   severity?: Severity | null;
+  category?: AnnotationCategory | null;
+  description?: string | null;
+  recommendation?: string | null;
+  tags?: string[] | null;
+  owner_id?: string | null;
+  owner_name?: string | null;
   created_at?: string | null;
   createdAt?: string | null;
+  updated_at?: string | null;
+  updatedAt?: string | null;
   coordinates: Record<string, any>;
 };
 
@@ -74,7 +84,7 @@ export default function OpenSeadragonUrlViewer(
 ) {
   const { sourceType, sourceUrl, imageKey, imageId, caseId } = props;
 
-  type AnnSource = BaseAnnotation["_source"]; // "local" | "api" | "ia"
+  type AnnSource = BaseAnnotation["_source"];
 
   function normalizeSource(s: any): AnnSource {
     return s === "local" || s === "api" || s === "ia" ? s : "local";
@@ -84,13 +94,24 @@ export default function OpenSeadragonUrlViewer(
   const viewerRef = useRef<OpenSeadragon.Viewer | null>(null);
 
   const [pendingAnn, setPendingAnn] = useState<Annotation | null>(null);
-  const [labelDraft, setLabelDraft] = useState<string>("");
-  const [severityDraft, setSeverityDraft] = useState<Severity>("Moyenne");
   const [draftAnnotations, setDraftAnnotations] = useState<Annotation[]>([]);
-  const [labelOpen, setLabelOpen] = useState<boolean>(false);
   const [annotations, setAnnotations] = useState<Annotation[]>([]);
   const [annotateMode, setAnnotateMode] = useState<boolean>(false);
   const [drawTool, setDrawTool] = useState<DrawTool>("rect");
+
+  const [selectedAnnotation, setSelectedAnnotation] =
+    useState<Annotation | null>(null);
+  const [detailOpen, setDetailOpen] = useState(false);
+  const [formMode, setFormMode] = useState<"create" | "view" | "edit">(
+    "create",
+  );
+
+  const [formLabel, setFormLabel] = useState("");
+  const [formSeverity, setFormSeverity] = useState<Severity>("Moyenne");
+  const [formCategory, setFormCategory] = useState<AnnotationCategory | "">("");
+  const [formDescription, setFormDescription] = useState("");
+  const [formRecommendation, setFormRecommendation] = useState("");
+  const [formTags, setFormTags] = useState("");
 
   const dragRef = useRef<DragRefState>({
     active: false,
@@ -99,6 +120,66 @@ export default function OpenSeadragonUrlViewer(
   });
 
   const canAnnotate = useMemo(() => Boolean(imageKey), [imageKey]);
+
+  function getCurrentUser() {
+    const token =
+      localStorage.getItem("access_token") ||
+      localStorage.getItem("token") ||
+      localStorage.getItem("accessToken");
+
+    if (!token) {
+      return { id: null, name: null };
+    }
+
+    try {
+      const payload = JSON.parse(atob(token.split(".")[1]));
+      const email = payload.sub || payload.email || null;
+      const name = payload.full_name || payload.name || email || null;
+      return { id: email, name };
+    } catch {
+      return { id: null, name: null };
+    }
+  }
+
+  function canEditAnnotation(ann: Annotation | null) {
+    if (!ann) return false;
+    const current = getCurrentUser();
+    return !!current.id && ann.ownerId === current.id;
+  }
+
+  function resetFormFields() {
+    setFormLabel("");
+    setFormSeverity("Moyenne");
+    setFormCategory("");
+    setFormDescription("");
+    setFormRecommendation("");
+    setFormTags("");
+  }
+
+  function fillFormFromAnnotation(ann: Annotation) {
+    setFormLabel(ann.label || "");
+    setFormSeverity(ann.severity || "Moyenne");
+    setFormCategory((ann.category as AnnotationCategory) || "");
+    setFormDescription(ann.description || "");
+    setFormRecommendation(ann.recommendation || "");
+    setFormTags((ann.tags || []).join(", "));
+  }
+
+  function openAnnotationDetails(ann: Annotation) {
+    setSelectedAnnotation(ann);
+    setFormMode("view");
+    fillFormFromAnnotation(ann);
+    setDetailOpen(true);
+  }
+
+  function closeDetailModal() {
+    setDetailOpen(false);
+    setSelectedAnnotation(null);
+    setPendingAnn(null);
+    setDraftAnnotations([]);
+    setFormMode("create");
+    resetFormFields();
+  }
 
   async function fetchAnnotationsForImage(
     imgId: string,
@@ -111,7 +192,7 @@ export default function OpenSeadragonUrlViewer(
     if (!res.ok) {
       const text = await res.text().catch(() => "");
       console.error(
-        "GET /api/annotations/image/imageID  error:",
+        "GET /api/annotations/image/imageID error:",
         res.status,
         text,
       );
@@ -120,7 +201,6 @@ export default function OpenSeadragonUrlViewer(
     return (await res.json()) as ApiAnnotationRow[];
   }
 
-  // Load annotations when imageKey changes
   useEffect(() => {
     let cancelled = false;
 
@@ -139,18 +219,32 @@ export default function OpenSeadragonUrlViewer(
             id: a.id,
             type: a.type,
             label: a.label ?? null,
+            category: a.category ?? null,
             severity: (a.severity ?? "Moyenne") as Severity,
+            description: a.description ?? null,
+            recommendation: a.recommendation ?? null,
+            tags: Array.isArray(a.tags) ? a.tags : [],
+            ownerId: a.owner_id ?? null,
+            ownerName: a.owner_name ?? null,
             createdAt: (a.created_at ??
               a.createdAt ??
               new Date().toISOString()) as string,
+            updatedAt: (a.updated_at ?? a.updatedAt ?? null) as string | null,
             _source: "api",
           };
 
-          // coordinates ne contient que la géométrie
           if (a.type === "rect") {
             const c = a.coordinates as RectAnnotation;
-            return { ...base, type: "rect", x: c.x, y: c.y, w: c.w, h: c.h };
+            return {
+              ...base,
+              type: "rect",
+              x: c.x,
+              y: c.y,
+              w: c.w,
+              h: c.h,
+            };
           }
+
           if (a.type === "circle") {
             const c = a.coordinates as CircleAnnotation;
             return {
@@ -162,7 +256,7 @@ export default function OpenSeadragonUrlViewer(
               ry: c.ry,
             };
           }
-          // polygon
+
           const c = a.coordinates as { points: PolygonPoint[] };
           return {
             ...base,
@@ -190,7 +284,6 @@ export default function OpenSeadragonUrlViewer(
     };
   }, [imageKey, imageId]);
 
-  // Init viewer
   useEffect(() => {
     if (!containerRef.current || !sourceUrl) return;
 
@@ -217,15 +310,14 @@ export default function OpenSeadragonUrlViewer(
     };
   }, [sourceType, sourceUrl]);
 
-  // Redraw overlays when annotations change
   useEffect(() => {
     const viewer = viewerRef.current;
     if (!viewer) return;
     if (!viewer.world || viewer.world.getItemCount() === 0) return;
+
     redrawAll(viewer, [...annotations, ...draftAnnotations]);
   }, [annotations, draftAnnotations]);
 
-  // Disable default OSD gestures while annotating
   useEffect(() => {
     const viewer = viewerRef.current;
     if (!viewer) return;
@@ -241,7 +333,34 @@ export default function OpenSeadragonUrlViewer(
     };
   }, [annotateMode]);
 
-  // Handlers annotation
+  useEffect(() => {
+    if (annotateMode) return;
+
+    const viewer = viewerRef.current;
+    if (!viewer) return;
+
+    if (dragRef.current.overlayEl) {
+      try {
+        viewer.removeOverlay(dragRef.current.overlayEl);
+      } catch {
+        // ignore
+      }
+    }
+
+    dragRef.current.active = false;
+    dragRef.current.startImage = null;
+    dragRef.current.overlayEl = null;
+
+    try {
+      polygonCancel(viewer, dragRef as any);
+    } catch {
+      // ignore
+    }
+
+    setPendingAnn(null);
+    setDraftAnnotations([]);
+  }, [annotateMode]);
+
   useEffect(() => {
     const viewer = viewerRef.current;
     if (!viewer || !canAnnotate) return;
@@ -253,7 +372,7 @@ export default function OpenSeadragonUrlViewer(
       attached = true;
 
       const onPress = (evt: OpenSeadragon.OSDEvent<any>) => {
-        if (!annotateMode) return;
+        if (!annotateMode || detailOpen) return;
 
         evt.preventDefaultAction = true;
 
@@ -291,18 +410,19 @@ export default function OpenSeadragonUrlViewer(
       };
 
       const onDrag = (evt: OpenSeadragon.OSDEvent<any>) => {
-        if (!annotateMode) return;
+        if (!annotateMode || detailOpen) return;
         if (!dragRef.current.active) return;
 
         evt.preventDefaultAction = true;
 
         if (drawTool === "rect") {
           const [el, x, y, w, h] = drawOnDragRect(evt, viewer, dragRef as any);
-          if (el)
+          if (el) {
             viewer.updateOverlay(
               el,
               imageRectToViewportRect(viewer, { x, y, w, h }),
             );
+          }
         } else if (drawTool === "circle") {
           const [el, x, y, w, h] = drawOnDragCircle(
             evt,
@@ -328,25 +448,26 @@ export default function OpenSeadragonUrlViewer(
       };
 
       const onMove = (evt: OpenSeadragon.OSDEvent<any>) => {
-        if (!annotateMode) return;
+        if (!annotateMode || detailOpen) return;
         if (drawTool !== "polygon") return;
         polygonMove(evt, viewer, dragRef as any);
       };
 
       const onDblClick = (evt: OpenSeadragon.OSDEvent<any>) => {
-        if (!annotateMode) return;
+        if (!annotateMode || detailOpen) return;
         if (drawTool !== "polygon") return;
         evt.preventDefaultAction = true;
         finalizePolygon();
       };
 
       const onRelease = (evt: OpenSeadragon.OSDEvent<any>) => {
-        if (!annotateMode) return;
+        if (!annotateMode || detailOpen) return;
         if (!dragRef.current.active) return;
 
         evt.preventDefaultAction = true;
 
         let annotation: Annotation | null = null;
+
         if (drawTool === "rect") {
           annotation = drawOnReleaseRect(
             evt,
@@ -370,10 +491,11 @@ export default function OpenSeadragonUrlViewer(
         if (!annotation) return;
 
         setPendingAnn(annotation);
+        setSelectedAnnotation(annotation);
         setDraftAnnotations([annotation]);
-        setLabelDraft("");
-        setSeverityDraft("Moyenne");
-        setLabelOpen(true);
+        setFormMode("create");
+        resetFormFields();
+        setDetailOpen(true);
       };
 
       viewer.addHandler("canvas-press", onPress);
@@ -406,7 +528,7 @@ export default function OpenSeadragonUrlViewer(
         // ignore
       }
     };
-  }, [annotateMode, canAnnotate, drawTool]);
+  }, [annotateMode, canAnnotate, drawTool, detailOpen]);
 
   const finalizePolygon = () => {
     const viewer = viewerRef.current;
@@ -416,10 +538,11 @@ export default function OpenSeadragonUrlViewer(
     if (!ann) return;
 
     setPendingAnn(ann);
+    setSelectedAnnotation(ann);
     setDraftAnnotations([ann]);
-    setLabelDraft("");
-    setSeverityDraft("Moyenne");
-    setLabelOpen(true);
+    setFormMode("create");
+    resetFormFields();
+    setDetailOpen(true);
   };
 
   const cancelPolygonUi = () => {
@@ -437,6 +560,7 @@ export default function OpenSeadragonUrlViewer(
     if (!imageKey) return;
     setAnnotations([]);
     saveAnnotations(imageKey, []);
+    setSelectedAnnotation(null);
   };
 
   function getToken() {
@@ -469,9 +593,6 @@ export default function OpenSeadragonUrlViewer(
       coordinates: buildCoordinatesPayload(ann),
     };
 
-    console.log("access_token:", localStorage.getItem("access_token"));
-    console.log("authHeaders():", authHeaders());
-
     const res = await fetch(`${IMAGES_API}/api/annotations/`, {
       method: "POST",
       headers: {
@@ -483,7 +604,7 @@ export default function OpenSeadragonUrlViewer(
 
     if (!res.ok) {
       const text = await res.text().catch(() => "");
-      console.error("POST /api/annotations  error:", res.status, text);
+      console.error("POST /api/annotations error:", res.status, text);
       throw new Error(`POST annotation failed: ${res.status} - ${text}`);
     }
     return await res.json();
@@ -500,14 +621,26 @@ export default function OpenSeadragonUrlViewer(
   const commitPendingAnnotation = async () => {
     if (!pendingAnn || !imageKey) return;
 
+    const currentUser = getCurrentUser();
+
     const nextAnn: Annotation = {
       ...pendingAnn,
       _source: normalizeSource((pendingAnn as any)?._source),
-      label: labelDraft.trim() || null,
-      severity: severityDraft,
+      label: formLabel.trim() || null,
+      severity: formSeverity,
+      category: formCategory || null,
+      description: formDescription.trim() || null,
+      recommendation: formRecommendation.trim() || null,
+      tags: formTags
+        .split(",")
+        .map((t) => t.trim())
+        .filter(Boolean),
+      ownerId: currentUser.id,
+      ownerName: currentUser.name,
+      createdAt: pendingAnn.createdAt || new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
     };
 
-    // Optimistic UI
     setAnnotations((prev) => {
       const next = [...prev, nextAnn];
       saveAnnotations(imageKey, next);
@@ -516,12 +649,15 @@ export default function OpenSeadragonUrlViewer(
 
     setPendingAnn(null);
     setDraftAnnotations([]);
-    setLabelOpen(false);
+    setSelectedAnnotation(nextAnn);
+    setFormMode("view");
+    setDetailOpen(false);
+    resetFormFields();
 
     try {
-      console.log("Saving annotation to API...", nextAnn);
-      console.log("imageId:", imageId, " | caseId:", caseId);
-      if (!imageId || !caseId) return;
+      if (!imageId || !caseId) {
+        return;
+      }
 
       const saved = await postAnnotationToApi({
         imageId,
@@ -529,30 +665,33 @@ export default function OpenSeadragonUrlViewer(
         ann: nextAnn,
       });
 
+      const savedAnn: Annotation = {
+        ...nextAnn,
+        id: saved.id as string,
+        _source: "api",
+      };
+
       setAnnotations((prev) => {
         const replaced = prev.map((a) =>
-          a.id === nextAnn.id
-            ? {
-                ...a,
-                id: saved.id as string,
-                _source: "api" as const,
-              }
-            : a,
+          a.id === nextAnn.id ? savedAnn : a,
         );
         saveAnnotations(imageKey, replaced);
         return replaced;
       });
+
+      setSelectedAnnotation(savedAnn);
     } catch (e) {
-      // stratégie: garder local et synchroniser plus tard
       console.error(e);
     }
   };
 
-  const cancelPendingAnnotation = () => {
-    setPendingAnn(null);
-    setDraftAnnotations([]);
-    setLabelOpen(false);
-  };
+  const annotationItems = useMemo(() => {
+    return [...annotations].sort((a, b) => {
+      const da = new Date(a.createdAt).getTime();
+      const db = new Date(b.createdAt).getTime();
+      return db - da;
+    });
+  }, [annotations]);
 
   return (
     <div
@@ -607,7 +746,7 @@ export default function OpenSeadragonUrlViewer(
             <div style={styles.divider} />
             <div style={styles.group}>
               <ToolButton
-                title="Terminer polygone (double-clic possible)"
+                title="Terminer polygone"
                 active={false}
                 disabled={!canAnnotate}
                 onClick={finalizePolygon}
@@ -638,71 +777,281 @@ export default function OpenSeadragonUrlViewer(
         </div>
       </div>
 
-      {labelOpen && (
+      <div style={styles.contentLayout}>
+        <div
+          ref={containerRef}
+          style={{
+            flex: 1,
+            minHeight: 320,
+            border: "1px solid #e6e6e6",
+            borderRadius: 10,
+            overflow: "hidden",
+            background: "#fafafa",
+            position: "relative",
+          }}
+        />
+
+        <div style={styles.sidebar}>
+          <div style={styles.sidebarHeader}>Labels / annotations</div>
+
+          {annotationItems.length === 0 ? (
+            <div style={styles.emptyState}>Aucune annotation</div>
+          ) : (
+            <div style={styles.annotationList}>
+              {annotationItems.map((ann) => {
+                const owner = ann.ownerName || ann.ownerId || "Inconnu";
+                const title =
+                  ann.label?.trim() ||
+                  `${ann.type === "rect"
+                    ? "Rectangle"
+                    : ann.type === "circle"
+                      ? "Cercle"
+                      : "Polygone"
+                  } sans label`;
+
+                return (
+                  <div
+                    key={ann.id}
+                    style={{
+                      ...styles.annotationCard,
+                      ...(selectedAnnotation?.id === ann.id
+                        ? styles.annotationCardActive
+                        : null),
+                    }}
+                  >
+                    <div style={styles.annotationCardTop}>
+                      <div style={styles.annotationTitle}>{title}</div>
+                      <div style={styles.annotationType}>{ann.type}</div>
+                    </div>
+
+                    <div style={styles.annotationMeta}>
+                      <div>
+                        <strong>Utilisateur :</strong> {owner}
+                      </div>
+                      <div>
+                        <strong>Date :</strong>{" "}
+                        {new Date(ann.createdAt).toLocaleString("fr-FR")}
+                      </div>
+                      {ann.severity && (
+                        <div>
+                          <strong>Sévérité :</strong> {ann.severity}
+                        </div>
+                      )}
+                    </div>
+
+                    <div style={styles.annotationActions}>
+                      <button
+                        type="button"
+                        style={modalStyles.secondaryBtn}
+                        onClick={() => openAnnotationDetails(ann)}
+                      >
+                        View
+                      </button>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      </div>
+
+      {detailOpen && (
         <div style={modalStyles.backdrop}>
-          <div style={modalStyles.modal}>
-            <h3 style={{ margin: "0 0 10px" }}>Décrire l’annotation</h3>
-
-            <label style={modalStyles.label}>
-              Label (optionnel)
-              <input
-                value={labelDraft}
-                onChange={(e) => setLabelDraft(e.target.value)}
-                style={modalStyles.input}
-                placeholder="Ex: zone suspecte…"
-              />
-            </label>
-
-            <label style={modalStyles.label}>
-              Sévérité
-              <select
-                value={severityDraft}
-                onChange={(e) => setSeverityDraft(e.target.value as Severity)}
-                style={modalStyles.input}
-              >
-                <option value="Faible">Faible</option>
-                <option value="Moyenne">Moyenne</option>
-                <option value="Élevée">Élevée</option>
-              </select>
-            </label>
-
+          <div style={modalStyles.modalLarge}>
             <div
               style={{
                 display: "flex",
-                justifyContent: "flex-end",
-                gap: 8,
-                marginTop: 10,
+                justifyContent: "space-between",
+                alignItems: "center",
+                marginBottom: 12,
               }}
             >
-              <button
-                onClick={cancelPendingAnnotation}
-                style={modalStyles.secondaryBtn}
-              >
-                Annuler
-              </button>
-              <button
-                onClick={commitPendingAnnotation}
-                style={modalStyles.primaryBtn}
-              >
-                Enregistrer
-              </button>
+              <h3 style={{ margin: 0 }}>
+                {formMode === "create"
+                  ? "Nouvelle annotation"
+                  : formMode === "edit"
+                    ? "Modifier l’annotation"
+                    : "Détail de l’annotation"}
+              </h3>
+
+              <div style={{ display: "flex", gap: 8 }}>
+                {selectedAnnotation &&
+                  canEditAnnotation(selectedAnnotation) &&
+                  formMode === "view" && (
+                    <button
+                      onClick={() => setFormMode("edit")}
+                      style={modalStyles.secondaryBtn}
+                    >
+                      Modifier
+                    </button>
+                  )}
+                <button onClick={closeDetailModal} style={modalStyles.secondaryBtn}>
+                  Fermer
+                </button>
+              </div>
             </div>
+
+            <div style={formGridStyles.grid}>
+              <label style={modalStyles.label}>
+                Label
+                <input
+                  value={formLabel}
+                  onChange={(e) => setFormLabel(e.target.value)}
+                  style={modalStyles.input}
+                  disabled={formMode === "view"}
+                  placeholder="Ex: Zone tumorale suspecte"
+                />
+              </label>
+
+              <label style={modalStyles.label}>
+                Catégorie
+                <select
+                  value={formCategory}
+                  onChange={(e) => setFormCategory(e.target.value as any)}
+                  style={modalStyles.input}
+                  disabled={formMode === "view"}
+                >
+                  <option value="">Sélectionner</option>
+                  <option value="Zone suspecte">Zone suspecte</option>
+                  <option value="Nécrose">Nécrose</option>
+                  <option value="Inflammation">Inflammation</option>
+                  <option value="Tumeur">Tumeur</option>
+                  <option value="Artefact">Artefact</option>
+                  <option value="Autre">Autre</option>
+                </select>
+              </label>
+
+              <label style={modalStyles.label}>
+                Sévérité
+                <select
+                  value={formSeverity}
+                  onChange={(e) => setFormSeverity(e.target.value as Severity)}
+                  style={modalStyles.input}
+                  disabled={formMode === "view"}
+                >
+                  <option value="Faible">Faible</option>
+                  <option value="Moyenne">Moyenne</option>
+                  <option value="Élevée">Élevée</option>
+                </select>
+              </label>
+
+              <label style={modalStyles.label}>
+                Tags
+                <input
+                  value={formTags}
+                  onChange={(e) => setFormTags(e.target.value)}
+                  style={modalStyles.input}
+                  disabled={formMode === "view"}
+                  placeholder="mitose, bordure, suspecte"
+                />
+              </label>
+
+              <label style={{ ...modalStyles.label, gridColumn: "1 / -1" }}>
+                Description
+                <textarea
+                  value={formDescription}
+                  onChange={(e) => setFormDescription(e.target.value)}
+                  style={modalStyles.textarea}
+                  disabled={formMode === "view"}
+                  placeholder="Description détaillée de l’annotation"
+                />
+              </label>
+
+              <label style={{ ...modalStyles.label, gridColumn: "1 / -1" }}>
+                Recommandation / commentaire
+                <textarea
+                  value={formRecommendation}
+                  onChange={(e) => setFormRecommendation(e.target.value)}
+                  style={modalStyles.textarea}
+                  disabled={formMode === "view"}
+                  placeholder="Commentaire clinique ou recommandation"
+                />
+              </label>
+
+              {selectedAnnotation && (
+                <div style={formGridStyles.metaBox}>
+                  <div>
+                    <strong>Type :</strong> {selectedAnnotation.type}
+                  </div>
+                  <div>
+                    <strong>Créé le :</strong>{" "}
+                    {new Date(selectedAnnotation.createdAt).toLocaleString(
+                      "fr-FR",
+                    )}
+                  </div>
+                  <div>
+                    <strong>Propriétaire :</strong>{" "}
+                    {selectedAnnotation.ownerName ||
+                      selectedAnnotation.ownerId ||
+                      "Inconnu"}
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {(formMode === "create" || formMode === "edit") && (
+              <div
+                style={{
+                  display: "flex",
+                  justifyContent: "flex-end",
+                  gap: 8,
+                  marginTop: 14,
+                }}
+              >
+                <button
+                  onClick={() => {
+                    closeDetailModal();
+                  }}
+                  style={modalStyles.secondaryBtn}
+                >
+                  Annuler
+                </button>
+
+                <button
+                  onClick={() => {
+                    if (formMode === "create") {
+                      void commitPendingAnnotation();
+                      return;
+                    }
+
+                    if (!selectedAnnotation || !imageKey) return;
+
+                    const updated: Annotation = {
+                      ...selectedAnnotation,
+                      label: formLabel.trim() || null,
+                      severity: formSeverity,
+                      category: formCategory || null,
+                      description: formDescription.trim() || null,
+                      recommendation: formRecommendation.trim() || null,
+                      tags: formTags
+                        .split(",")
+                        .map((t) => t.trim())
+                        .filter(Boolean),
+                      updatedAt: new Date().toISOString(),
+                    };
+
+                    setAnnotations((prev) => {
+                      const next = prev.map((a) =>
+                        a.id === selectedAnnotation.id ? updated : a,
+                      );
+                      saveAnnotations(imageKey, next);
+                      return next;
+                    });
+
+                    setSelectedAnnotation(updated);
+                    setFormMode("view");
+                    setDetailOpen(true);
+                  }}
+                  style={modalStyles.primaryBtn}
+                >
+                  Enregistrer
+                </button>
+              </div>
+            )}
           </div>
         </div>
       )}
-
-      <div
-        ref={containerRef}
-        style={{
-          flex: 1,
-          minHeight: 320,
-          border: "1px solid #e6e6e6",
-          borderRadius: 10,
-          overflow: "hidden",
-          background: "#fafafa",
-          position: "relative",
-        }}
-      />
     </div>
   );
 }
@@ -711,13 +1060,21 @@ function redrawAll(
   viewer: OpenSeadragon.Viewer,
   annotations: Annotation[],
 ): void {
-  const overlays = (viewer as any).currentOverlays as
-    | Array<{ element?: HTMLElement }>
-    | undefined;
-  (overlays ?? []).forEach((o) => {
+  const overlays = ((viewer as any).currentOverlays ?? []) as Array<{
+    element?: HTMLElement;
+  }>;
+
+  overlays.forEach((o) => {
     const el = o?.element;
-    if (el && (el as any).dataset?.kind === "persisted") {
-      viewer.removeOverlay(el);
+    if (!el) return;
+
+    const kind = (el as any).dataset?.kind;
+    if (kind === "persisted" || kind === "label") {
+      try {
+        viewer.removeOverlay(el);
+      } catch {
+        // ignore
+      }
     }
   });
 
@@ -729,10 +1086,12 @@ function redrawAll(
       el.style.border = "2px solid #ff3b30";
       el.style.background = "rgba(255,59,48,0.08)";
       el.dataset.kind = "persisted";
+
       viewer.addOverlay({
         element: el,
         location: imageRectToViewportRect(viewer, ann),
       });
+
       if (ann.label) addLabel(viewer, ann, ann.label, "rect");
       return;
     }
@@ -745,10 +1104,12 @@ function redrawAll(
       el.style.background = "rgba(255,59,48,0.08)";
       el.style.borderRadius = "9999px";
       el.dataset.kind = "persisted";
+
       viewer.addOverlay({
         element: el,
         location: imageEllipseToViewportRect(viewer, ann),
       });
+
       if (ann.label) addLabel(viewer, ann, ann.label, "circle");
       return;
     }
@@ -762,10 +1123,11 @@ function redrawAll(
         viewer.viewport.imageToViewportCoordinates(p.x, p.y),
       );
 
-      let vminX = Infinity,
-        vminY = Infinity,
-        vmaxX = -Infinity,
-        vmaxY = -Infinity;
+      let vminX = Infinity;
+      let vminY = Infinity;
+      let vmaxX = -Infinity;
+      let vmaxY = -Infinity;
+
       for (const p of vpts) {
         vminX = Math.min(vminX, p.x);
         vminY = Math.min(vminY, p.y);
@@ -786,43 +1148,49 @@ function redrawAll(
       svg.setAttribute("height", "100%");
       svg.setAttribute("viewBox", `${vbX} ${vbY} ${vbW} ${vbH}`);
       svg.style.overflow = "visible";
+      (svg as any).dataset.kind = "persisted";
 
       const poly = document.createElementNS(svgNS, "polygon");
       poly.setAttribute("fill", "rgba(255,0,0,0.30)");
       poly.setAttribute("stroke", "#ff0000");
       poly.setAttribute("stroke-width", "0.0012");
       poly.setAttribute("stroke-linejoin", "round");
-      poly.setAttribute("points", vpts.map((p) => `${p.x},${p.y}`).join(" "));
+      poly.setAttribute(
+        "points",
+        vpts.map((p) => `${p.x},${p.y}`).join(" "),
+      );
 
       svg.appendChild(poly);
 
-      let minX = Infinity,
-        minY = Infinity,
-        maxX = -Infinity,
-        maxY = -Infinity;
+      let minX = Infinity;
+      let minY = Infinity;
+      let maxX = -Infinity;
+      let maxY = -Infinity;
+
       for (const p of ann.points) {
         minX = Math.min(minX, p.x);
         minY = Math.min(minY, p.y);
         maxX = Math.max(maxX, p.x);
         maxY = Math.max(maxY, p.y);
       }
+
       const rect = imageRectToViewportRect(viewer, {
         x: minX,
         y: minY,
         w: maxX - minX,
         h: maxY - minY,
-      } as any);
+      });
 
-      (svg as any).dataset.kind = "persisted";
       viewer.addOverlay({ element: svg, location: rect });
 
-      if (ann.label)
+      if (ann.label) {
         addLabel(
           viewer,
           { x: minX, y: minY, w: maxX - minX, h: maxY - minY },
           ann.label,
           "polygon",
         );
+      }
     }
   });
 }
@@ -842,10 +1210,11 @@ function addLabel(
   el.style.fontSize = "12px";
   el.style.padding = "2px 6px";
   el.style.borderRadius = "6px";
-  el.style.background = "rgba(255,255,255,0.9)";
+  el.style.background = "rgba(255,255,255,0.92)";
   el.style.border = "1px solid #ddd";
   el.style.pointerEvents = "none";
   el.style.whiteSpace = "nowrap";
+  el.dataset.kind = "label";
 
   const x =
     kind === "circle"
@@ -855,8 +1224,6 @@ function addLabel(
     kind === "circle"
       ? (shape as CircleAnnotation).cy - (shape as CircleAnnotation).ry
       : (shape as any).y;
-
-  el.dataset.kind = "persisted";
 
   viewer.addOverlay({
     element: el,
@@ -898,6 +1265,84 @@ const styles: Record<string, React.CSSProperties> = {
     border: "1px solid #e6e6e6",
     borderRadius: 10,
     background: "#fff",
+  },
+  contentLayout: {
+    display: "grid",
+    gridTemplateColumns: "minmax(0,1fr) 300px",
+    gap: 12,
+    flex: 1,
+    minHeight: 0,
+  },
+  sidebar: {
+    border: "1px solid #e6e6e6",
+    borderRadius: 10,
+    background: "#fff",
+    display: "flex",
+    flexDirection: "column",
+    minHeight: 320,
+    overflow: "hidden",
+  },
+  sidebarHeader: {
+    padding: "12px 14px",
+    borderBottom: "1px solid #eee",
+    fontWeight: 600,
+    fontSize: 14,
+  },
+  emptyState: {
+    padding: 14,
+    color: "#666",
+    fontSize: 13,
+  },
+  annotationList: {
+    display: "flex",
+    flexDirection: "column",
+    gap: 10,
+    padding: 10,
+    overflowY: "auto",
+  },
+  annotationCard: {
+    border: "1px solid #e5e7eb",
+    borderRadius: 10,
+    padding: 10,
+    display: "grid",
+    gap: 8,
+    background: "#fff",
+  },
+  annotationCardActive: {
+    borderColor: "#ff3b30",
+    boxShadow: "0 0 0 2px rgba(255,59,48,0.08)",
+  },
+  annotationCardTop: {
+    display: "flex",
+    justifyContent: "space-between",
+    alignItems: "center",
+    gap: 8,
+  },
+  annotationTitle: {
+    fontWeight: 600,
+    fontSize: 13,
+    color: "#111827",
+    overflow: "hidden",
+    textOverflow: "ellipsis",
+    whiteSpace: "nowrap",
+  },
+  annotationType: {
+    fontSize: 11,
+    padding: "2px 6px",
+    borderRadius: 999,
+    background: "#f3f4f6",
+    color: "#374151",
+    textTransform: "uppercase",
+  },
+  annotationMeta: {
+    display: "grid",
+    gap: 4,
+    fontSize: 12,
+    color: "#4b5563",
+  },
+  annotationActions: {
+    display: "flex",
+    justifyContent: "flex-end",
   },
   group: { display: "flex", alignItems: "center", gap: 6 },
   divider: {
@@ -941,14 +1386,6 @@ const modalStyles: Record<string, React.CSSProperties> = {
     justifyContent: "center",
     zIndex: 100,
   },
-  modal: {
-    width: "min(520px, 92vw)",
-    background: "#fff",
-    borderRadius: 12,
-    border: "1px solid #e6e6e6",
-    boxShadow: "0 12px 30px rgba(0,0,0,0.18)",
-    padding: 14,
-  },
   label: {
     fontSize: 12,
     color: "#444",
@@ -975,6 +1412,41 @@ const modalStyles: Record<string, React.CSSProperties> = {
     border: "1px solid #ddd",
     background: "#fff",
   },
+  modalLarge: {
+    width: "min(760px, 94vw)",
+    background: "#fff",
+    borderRadius: 12,
+    border: "1px solid #e6e6e6",
+    boxShadow: "0 12px 30px rgba(0,0,0,0.18)",
+    padding: 16,
+  },
+  textarea: {
+    width: "100%",
+    minHeight: 110,
+    padding: 10,
+    borderRadius: 10,
+    border: "1px solid #ddd",
+    resize: "vertical",
+  },
+};
+
+const formGridStyles: Record<string, React.CSSProperties> = {
+  grid: {
+    display: "grid",
+    gridTemplateColumns: "1fr 1fr",
+    gap: 12,
+  },
+  metaBox: {
+    gridColumn: "1 / -1",
+    background: "#f8fafc",
+    border: "1px solid #e2e8f0",
+    borderRadius: 10,
+    padding: 12,
+    fontSize: 13,
+    color: "#334155",
+    display: "grid",
+    gap: 6,
+  },
 };
 
 function IconRect() {
@@ -992,6 +1464,7 @@ function IconRect() {
     </svg>
   );
 }
+
 function IconCircle() {
   return (
     <svg width="18" height="18" viewBox="0 0 18 18" aria-hidden="true">
@@ -1006,6 +1479,7 @@ function IconCircle() {
     </svg>
   );
 }
+
 function IconPolygon() {
   return (
     <svg width="18" height="18" viewBox="0 0 18 18" aria-hidden="true">
@@ -1018,6 +1492,7 @@ function IconPolygon() {
     </svg>
   );
 }
+
 function IconPencil() {
   return (
     <svg width="18" height="18" viewBox="0 0 18 18" aria-hidden="true">
@@ -1026,6 +1501,7 @@ function IconPencil() {
     </svg>
   );
 }
+
 function IconCheck() {
   return (
     <svg width="18" height="18" viewBox="0 0 18 18" aria-hidden="true">
@@ -1040,6 +1516,7 @@ function IconCheck() {
     </svg>
   );
 }
+
 function IconX() {
   return (
     <svg width="18" height="18" viewBox="0 0 18 18" aria-hidden="true">
@@ -1052,6 +1529,7 @@ function IconX() {
     </svg>
   );
 }
+
 function IconTrash() {
   return (
     <svg width="18" height="18" viewBox="0 0 18 18" aria-hidden="true">
