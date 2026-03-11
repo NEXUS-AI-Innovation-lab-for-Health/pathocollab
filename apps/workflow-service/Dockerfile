@@ -11,8 +11,8 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY . .
 
-RUN chmod +x /app/entrypoint.sh
+RUN chmod +x docker/entrypoint.sh
 
 EXPOSE 8003
 
-CMD ["/app/entrypoint.sh"]
+CMD ["docker/entrypoint.sh"]

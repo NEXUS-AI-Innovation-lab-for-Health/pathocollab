@@ -16,8 +16,20 @@ load_dotenv()
 
 config = context.config
 
-# Override sqlalchemy.url with env variable
-config.set_main_option('sqlalchemy.url', os.getenv('DATABASE_URL', 'postgresql://pixtral_user:pixtral_pass@localhost:5432/auth_db'))
+# Use sync DB URL for Alembic migrations
+database_url = os.getenv(
+    "ALEMBIC_DATABASE_URL",
+    os.getenv(
+        "DATABASE_URL",
+        "postgresql+psycopg2://pixtral_user:pixtral_pass@localhost:5432/auth_db"
+    ),
+)
+
+# Safety: if DATABASE_URL uses asyncpg, convert it for Alembic
+if database_url.startswith("postgresql+asyncpg://"):
+    database_url = database_url.replace("postgresql+asyncpg://", "postgresql+psycopg2://", 1)
+
+config.set_main_option("sqlalchemy.url", database_url)
 
 if config.config_file_name is not None:
     fileConfig(config.config_file_name)
@@ -31,6 +43,7 @@ def run_migrations_offline() -> None:
         target_metadata=target_metadata,
         literal_binds=True,
         dialect_opts={"paramstyle": "named"},
+        compare_type=True,
     )
 
     with context.begin_transaction():
@@ -45,7 +58,9 @@ def run_migrations_online() -> None:
 
     with connectable.connect() as connection:
         context.configure(
-            connection=connection, target_metadata=target_metadata
+            connection=connection,
+            target_metadata=target_metadata,
+            compare_type=True,
         )
 
         with context.begin_transaction():

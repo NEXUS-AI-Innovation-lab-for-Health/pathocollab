@@ -17,7 +17,7 @@ from app.models.workflow import (
     WorkflowEngine,
 )
 from app.services.notification_service import NotificationService
-from app.services.olga_client import OlgaClient, OlgaClientError
+from app.services.olga_client import OlgaClient
 from app.utils.database import get_db
 
 router = APIRouter(prefix="/workflows", tags=["Workflows"])
@@ -64,7 +64,7 @@ async def create_workflow(
                 workflow_code=workflow_data.olga_workflow_code or "",
                 data={"case_id": workflow_data.case_id},
             )
-        except OlgaClientError as exc:
+        except Exception as exc:
             raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc)) from exc
 
         db_workflow.olga_session_id = (

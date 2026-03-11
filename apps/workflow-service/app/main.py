@@ -7,8 +7,7 @@ from dotenv import load_dotenv
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.routes import notifications, workflow, olga_forms
-
+from app.routes import notifications, workflow, olga
 
 load_dotenv()
 
@@ -33,7 +32,7 @@ app.add_middleware(
 
 app.include_router(workflow.router, prefix="/api")
 app.include_router(notifications.router, prefix="/api")
-app.include_router(olga_forms.router, prefix="/api")
+app.include_router(olga.router, prefix="/api")
 
 @app.get("/health")
 def health_check() -> dict[str, str]:

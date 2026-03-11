@@ -1,32 +1,29 @@
-version: "3.9"
-
 services:
-  # PostgreSQL - 5 bases de données
   postgres:
-    image: ultimatedpv4/pixtral-postgres-data:v1
-    container_name: pixtral-postgres
+    image: postgres:16
+    container_name: PathoCollab-postgres
+    restart: unless-stopped
     environment:
       POSTGRES_USER: pixtral_user
       POSTGRES_PASSWORD: pixtral_pass
-      POSTGRES_MULTIPLE_DATABASES: auth_db,cases_db,workflow_db,images_db,reports_db
+      POSTGRES_DB: postgres
     ports:
       - "5432:5432"
     volumes:
-      - ./postgres/init-multiple-databases.sh:/docker-entrypoint-initdb.d/init-multiple-databases.sh
-      - ./postgres/seed-databases.sh:/docker-entrypoint-initdb.d/seed-databases.sh
-      - ./postgres/seed:/docker-entrypoint-initdb.d/seed
+      - postgres-data:/var/lib/postgresql/data
+      - ./postgres/init-multiple-databases.sql:/docker-entrypoint-initdb.d/01-init-multiple-databases.sql
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U pixtral_user"]
+      test: ["CMD-SHELL", "pg_isready -U pixtral_user -d postgres"]
       interval: 10s
       timeout: 5s
       retries: 5
     networks:
       - pixtral-network
 
-  # Redis - Cache & sessions + workflow memory
   redis:
     image: redis:7-alpine
-    container_name: pixtral-redis
+    container_name: PathoCollab-redis
+    restart: unless-stopped
     ports:
       - "6379:6379"
     volumes:
@@ -39,10 +36,10 @@ services:
     networks:
       - pixtral-network
 
-  # MinIO - Stockage d'images WSI
   minio:
-    image: ultimatedpv4/pixtral-minio-data:v1
-    container_name: pixtral-minio
+    image: minio/minio:latest
+    container_name: PathoCollab-minio
+    restart: unless-stopped
     command: server /data --console-address ":9001"
     environment:
       MINIO_ROOT_USER: minioadmin
@@ -50,173 +47,47 @@ services:
     ports:
       - "9000:9000"
       - "9001:9001"
+    volumes:
+      - minio-data:/data
     networks:
       - pixtral-network
 
-  # Création des buckets MinIO (idempotent)
   minio-init:
     image: minio/mc:latest
-    container_name: pixtral-minio-init
+    container_name: PathoCollab-minio-init
     depends_on:
       - minio
     entrypoint: >
       /bin/sh -c "
       sleep 5;
-      /usr/bin/mc alias set myminio http://minio:9000 minioadmin minioadmin;
-      /usr/bin/mc mb --ignore-existing myminio/pixtral-wsi-images;
-      /usr/bin/mc mb --ignore-existing myminio/pixtral-images;
-      /usr/bin/mc anonymous set download myminio/pixtral-wsi-images || true;
-      /usr/bin/mc anonymous set download myminio/pixtral-images || true;
+      mc alias set local http://minio:9000 minioadmin minioadmin;
+      mc mb --ignore-existing local/pixtral-images;
+      mc mb --ignore-existing local/pixtral-wsi-images;
       exit 0;
       "
     networks:
       - pixtral-network
 
-  # Redpanda (Kafka-compatible) - Bus d'événements
-  redpanda:
-    image: docker.redpanda.com/redpandadata/redpanda:v23.3.3
-    container_name: pixtral-redpanda
-    command:
-      - redpanda
-      - start
-      - --smp
-      - "1"
-      - --reserve-memory
-      - 0M
-      - --overprovisioned
-      - --node-id
-      - "0"
-      - --kafka-addr
-      - PLAINTEXT://0.0.0.0:29092,OUTSIDE://0.0.0.0:9092
-      - --advertise-kafka-addr
-      - PLAINTEXT://redpanda:29092,OUTSIDE://localhost:9092
-    ports:
-      - "9092:9092"
-      - "9644:9644"
-    volumes:
-      - redpanda-data:/var/lib/redpanda/data
-    healthcheck:
-      test:
-        ["CMD-SHELL", "rpk cluster health | grep -E 'Healthy:.+true' || exit 1"]
-      interval: 15s
-      timeout: 10s
-      retries: 5
-      start_period: 30s
-    networks:
-      - pixtral-network
-
-  # Qdrant - Vector DB pour RAG
   qdrant:
     image: qdrant/qdrant:latest
-    container_name: pixtral-qdrant
+    container_name: PathoCollab-qdrant
+    restart: unless-stopped
     ports:
       - "6333:6333"
-    networks:
-      - pixtral-network
-
-  # n8n - Workflow automation
-  n8n:
-    image: n8nio/n8n:latest
-    container_name: pixtral-n8n
-    environment:
-      - N8N_BASIC_AUTH_ACTIVE=true
-      - N8N_BASIC_AUTH_USER=admin
-      - N8N_BASIC_AUTH_PASSWORD=pixtral2025
-      - N8N_HOST=localhost
-      - N8N_PORT=5678
-      - N8N_PROTOCOL=http
-      - WEBHOOK_URL=http://localhost:5678/
-    ports:
-      - "5678:5678"
     volumes:
-      - n8n-data:/home/node/.n8n
-    healthcheck:
-      test: ["CMD", "wget", "--spider", "-q", "http://localhost:5678/healthz"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
+      - qdrant-data:/qdrant/storage
     networks:
       - pixtral-network
 
-  # Prometheus - Métriques
-  prometheus:
-    image: prom/prometheus:latest
-    container_name: pixtral-prometheus
-    command:
-      - "--config.file=/etc/prometheus/prometheus.yml"
-      - "--storage.tsdb.path=/prometheus"
-      - "--web.console.libraries=/usr/share/prometheus/console_libraries"
-      - "--web.console.templates=/usr/share/prometheus/consoles"
-    ports:
-      - "9090:9090"
-    volumes:
-      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml
-      - prometheus-data:/prometheus
-    healthcheck:
-      test: ["CMD", "wget", "--spider", "-q", "http://localhost:9090/-/healthy"]
-      interval: 15s
-      timeout: 10s
-      retries: 3
-    networks:
-      - pixtral-network
-
-  # Grafana - Dashboards
-  grafana:
-    image: grafana/grafana:latest
-    container_name: pixtral-grafana
-    environment:
-      - GF_SECURITY_ADMIN_USER=admin
-      - GF_SECURITY_ADMIN_PASSWORD=pixtral2025
-      - GF_USERS_ALLOW_SIGN_UP=false
-    ports:
-      - "3001:3000"
-    volumes:
-      - grafana-data:/var/lib/grafana
-      - ./monitoring/grafana/dashboards:/etc/grafana/provisioning/dashboards
-      - ./monitoring/grafana/datasources:/etc/grafana/provisioning/datasources
-    depends_on:
-      - prometheus
-    healthcheck:
-      test:
-        ["CMD", "wget", "--spider", "-q", "http://localhost:3000/api/health"]
-      interval: 15s
-      timeout: 10s
-      retries: 3
-    networks:
-      - pixtral-network
-
-  # Backend Gateway (Port 8000) - Point d'entrée unique pour le frontend
-  backend-gateway:
-    build:
-      context: ../backend
-      dockerfile: Dockerfile
-    container_name: pixtral-backend-gateway
-    environment:
-      AUTH_SERVICE_URL: http://auth-service:8001
-      CASES_SERVICE_URL: http://cases-service:8002
-      IMAGES_SERVICE_URL: http://images-service:8003
-      REPORTS_SERVICE_URL: http://reports-service:8004
-      WORKFLOW_SERVICE_URL: http://workflow-service:8005
-      CORS_ORIGINS: "*"
-    depends_on:
-      - auth-service
-      - cases-service
-      - images-service
-      - reports-service
-      - workflow-service
-    ports:
-      - "8000:8000"
-    networks:
-      - pixtral-network
-
-  # Auth Service (Port 8001) - Service d'authentification
   auth-service:
     build:
       context: ../apps/auth-service
       dockerfile: Dockerfile
-    container_name: pixtral-auth-service
+    container_name: PathoCollab-auth-service
+    restart: unless-stopped
     environment:
       DATABASE_URL: postgresql+asyncpg://pixtral_user:pixtral_pass@postgres:5432/auth_db
+      ALEMBIC_DATABASE_URL: postgresql+psycopg2://pixtral_user:pixtral_pass@postgres:5432/auth_db
       JWT_SECRET_KEY: super-secret-key
     depends_on:
       - postgres
@@ -225,12 +96,12 @@ services:
     networks:
       - pixtral-network
 
-  # Cases Service (Port 8002) - Gestion des cas cliniques
   cases-service:
     build:
       context: ../apps/cases-service
       dockerfile: Dockerfile
-    container_name: pixtral-cases-service
+    container_name: PathoCollab-cases-service
+    restart: unless-stopped
     environment:
       SERVICE_PORT: "8002"
       DATABASE_URL: postgresql+asyncpg://pixtral_user:pixtral_pass@postgres:5432/cases_db
@@ -242,18 +113,16 @@ services:
     networks:
       - pixtral-network
 
-  # Workflow Service (Port 8003) - Gestion des workflows collaboratifs
   workflow-service:
     build:
       context: ../apps/workflow-service
       dockerfile: Dockerfile
-    container_name: pixtral-workflow-service
+    container_name: PathoCollab-workflow-service
+    restart: unless-stopped
     environment:
       SERVICE_PORT: "8003"
       DATABASE_URL: postgresql+asyncpg://pixtral_user:pixtral_pass@postgres:5432/workflow_db
       ALEMBIC_DATABASE_URL: postgresql+psycopg2://pixtral_user:pixtral_pass@postgres:5432/workflow_db
-      # Optionnel: pour les notifications si tu en as besoin
-      # NOTIFICATIONS_ENABLED: "true"
     depends_on:
       - postgres
     ports:
@@ -261,21 +130,21 @@ services:
     networks:
       - pixtral-network
 
-  # Images Service (Port 8004) - Gestion des images médicales
   images-service:
     build:
       context: ../apps/images-service
       dockerfile: Dockerfile
-    container_name: pixtral-images-service
+    container_name: PathoCollab-images-service
+    restart: unless-stopped
     environment:
       SERVICE_PORT: "8004"
       DATABASE_URL: postgresql+asyncpg://pixtral_user:pixtral_pass@postgres:5432/images_db
       ALEMBIC_DATABASE_URL: postgresql+psycopg2://pixtral_user:pixtral_pass@postgres:5432/images_db
-      MINIO_ENDPOINT: http://minio:9000
+      MINIO_ENDPOINT: minio:9000
       MINIO_ACCESS_KEY: minioadmin
       MINIO_SECRET_KEY: minioadmin
-      MINIO_BUCKET_IMAGES: pixtral-images
-      MINIO_BUCKET_WSI: pixtral-wsi-images
+      MINIO_BUCKET_IMAGES: PathoCollab-images
+      MINIO_BUCKET_WSI: PathoCollab-wsi-images
     depends_on:
       - postgres
       - minio
@@ -284,20 +153,18 @@ services:
     networks:
       - pixtral-network
 
-  # Reports Service (Port 8005) - Gestion des rapports médicaux
   reports-service:
     build:
       context: ../apps/reports-service
       dockerfile: Dockerfile
-    container_name: pixtral-reports-service
+    container_name: PathoCollab-reports-service
+    restart: unless-stopped
     environment:
       SERVICE_PORT: "8005"
       DATABASE_URL: postgresql+asyncpg://pixtral_user:pixtral_pass@postgres:5432/reports_db
       ALEMBIC_DATABASE_URL: postgresql+psycopg2://pixtral_user:pixtral_pass@postgres:5432/reports_db
       QDRANT_URL: http://qdrant:6333
       WAIT_FOR_QDRANT: "true"
-      # si ton AI service utilise une clé :
-      # OPENAI_API_KEY: ${OPENAI_API_KEY}
     depends_on:
       - postgres
       - qdrant
@@ -306,15 +173,28 @@ services:
     networks:
       - pixtral-network
 
-  
+  backend-gateway:
+    build:
+      context: ../backend
+      dockerfile: Dockerfile
+    container_name: PathoCollab-backend-gateway
+    restart: unless-stopped
+    depends_on:
+      - auth-service
+      - cases-service
+      - workflow-service
+      - images-service
+      - reports-service
+    ports:
+      - "8000:8000"
+    networks:
+      - pixtral-network
 
 volumes:
+  postgres-data:
   redis-data:
-  redpanda-data:
+  minio-data:
   qdrant-data:
-  n8n-data:
-  prometheus-data:
-  grafana-data:
 
 networks:
   pixtral-network:
