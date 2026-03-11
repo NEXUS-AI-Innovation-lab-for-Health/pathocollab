@@ -92,10 +92,11 @@ const Dashboard = () => {
       const token = localStorage.getItem("access_token");
       if (!token) {
         console.log("Aucun token trouvé");
+        setNotifications([]);
+        setUnreadCount(0);
         return;
       }
 
-      // Récupérer l'email de l'utilisateur depuis le token
       const tokenData = JSON.parse(atob(token.split(".")[1]));
       const email = tokenData.sub || tokenData.email || "";
 
@@ -112,10 +113,21 @@ const Dashboard = () => {
       );
 
       console.log("Notifications reçues:", response.data);
-      setNotifications(response.data);
-      setUnreadCount(response.data.filter((n) => !n.is_read).length);
+
+      const notificationsData = Array.isArray(response.data)
+        ? response.data
+        : Array.isArray(response.data?.notifications)
+          ? response.data.notifications
+          : [];
+
+      setNotifications(notificationsData);
+      setUnreadCount(
+        notificationsData.filter((n) => !n.is_read).length,
+      );
     } catch (error) {
       console.error("Erreur lors de la récupération des notifications:", error);
+      setNotifications([]);
+      setUnreadCount(0);
     }
   };
 
@@ -310,13 +322,13 @@ const Dashboard = () => {
                     <h3 className="font-semibold text-sm mb-2">
                       Notifications
                     </h3>
-                    {notifications.length === 0 ? (
+                    {!Array.isArray(notifications) || notifications.length === 0 ? (
                       <p className="text-sm text-gray-500 p-2">
                         Aucune notification
                       </p>
                     ) : (
                       <div className="max-h-64 overflow-y-auto">
-                        {notifications.map((notification) => (
+                        {(Array.isArray(notifications) ? notifications : []).map((notification) => (
                           <div
                             key={notification.id}
                             className={`p-3 rounded-lg mb-2 cursor-pointer transition-colors ${

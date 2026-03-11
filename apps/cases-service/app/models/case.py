@@ -1,4 +1,4 @@
-from sqlalchemy import Column, String, DateTime, Text, Enum as SQLEnum
+from sqlalchemy import Column, String, DateTime, Text, Enum as SQLEnum, JSON
 from pydantic import BaseModel, Field
 from typing import Optional, List
 from datetime import datetime, timezone
@@ -19,9 +19,19 @@ class CaseDB(Base):
     patient_id = Column(String, nullable=False, index=True)
     title = Column(String, nullable=False)
     description = Column(Text, nullable=True)
-    status = Column(SQLEnum(CaseStatus), default=CaseStatus.PENDING)
+    
+    status = Column(
+        SQLEnum(
+            CaseStatus,
+            name="casestatus",
+            values_callable=lambda enum_cls: [e.value for e in enum_cls]
+        ),
+        default=CaseStatus.PENDING,
+        nullable=False
+    )
+
     created_by = Column(String, nullable=False)
-    assigned_specialists = Column(Text, nullable=True)  # JSON string
+    assigned_specialists = Column(JSON, nullable=True)
     created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
     updated_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
     completed_at = Column(DateTime(timezone=True), nullable=True)

@@ -1,15 +1,14 @@
 from sqlalchemy import Column, Date, String, Integer, DateTime, Text
-from sqlalchemy.ext.declarative import declarative_base
 from pydantic import BaseModel, Field
 from typing import Any, Dict, List, Optional
 from datetime import date, datetime, timezone
 import uuid
 
-Base = declarative_base()
+from .base import Base
 
 class PatientDB(Base):
     __tablename__ = "patients"
-    
+
     id = Column(String, primary_key=True, default=lambda: f"PAT-{str(uuid.uuid4())[:8]}")
     full_name = Column(String, nullable=False)
     age = Column(Integer, nullable=False)
@@ -20,7 +19,7 @@ class PatientDB(Base):
     imaging_notes = Column(Text, nullable=True)
     created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
     updated_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
-
+    
 class Patient(BaseModel):
     id: str
     full_name: str
@@ -31,7 +30,7 @@ class Patient(BaseModel):
     imaging_notes: Optional[str] = None
     created_at: datetime
     date_of_birth: Optional[date] = None
-    
+
     class Config:
         from_attributes = True
 
@@ -43,29 +42,3 @@ class PatientCreate(BaseModel):
     symptoms: Optional[str] = None
     imaging_notes: Optional[str] = None
     date_of_birth: Optional[date] = None
-
-
-class OlgaField(BaseModel):
-    field_hint: Optional[str] = ""
-    field_required: bool = False
-    unique_id: str
-    field_key: str
-    field_events: Optional[Dict[str, Any]] = {}
-    field_mode: Optional[str] = "edit"
-    field_label: Optional[str] = ""
-    field_type: str
-
-
-class OlgaFormSchema(BaseModel):
-    form_version: str
-    models: List[str]
-    form_label: str
-    last_updated: str
-    form: List[OlgaField]
-    form_category: str
-    form_id: str
-
-
-class DynamicFormSubmission(BaseModel):
-    form_id: str
-    data: Dict[str, Any]

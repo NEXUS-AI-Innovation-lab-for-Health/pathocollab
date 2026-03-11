@@ -180,7 +180,7 @@ async def get_olga_tasks(
     olga_client = OlgaClient()
     try:
         tasks = await olga_client.get_tasks(workflow.olga_session_id)
-    except OlgaClientError as exc:
+    except Exception as exc:
         raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc)) from exc
 
     return OlgaTasksResponse(
@@ -206,7 +206,7 @@ async def complete_olga_task(
     try:
         result = await olga_client.complete_task(task_id, payload.data)
         session = await olga_client.get_session(workflow.olga_session_id) if workflow.olga_session_id else {}
-    except OlgaClientError as exc:
+    except Exception as exc:
         raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc)) from exc
 
     workflow.olga_status = session.get("status", workflow.olga_status)

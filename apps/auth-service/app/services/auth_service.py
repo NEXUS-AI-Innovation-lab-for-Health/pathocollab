@@ -8,7 +8,7 @@ from fastapi import HTTPException, status
 from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.user import UserDB, UserCreate, UserLogin, User
+from app.models.user import UserDB, UserCreate, UserLogin, User, UserRole
 from app.models.token import Token
 from app.utils.security import (
     create_access_token,
@@ -19,6 +19,14 @@ from app.utils.security import (
 
 
 class AuthService:
+    @staticmethod
+    def _specialist_roles():
+        return [
+            UserRole.ANATOMOPATHOLOGISTE,
+            UserRole.ONCOLOGUE,
+            UserRole.RADIOLOGUE,
+        ]
+
     @staticmethod
     async def register_user(db: AsyncSession, user_data: UserCreate) -> User:
         # Vérifier si l'email existe déjà
@@ -86,15 +94,33 @@ class AuthService:
         user = res.scalars().first()
         if not user:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
-        return User.model_validate(user)
+        return User(
+            id=user.id,
+            email=user.email,
+            full_name=user.full_name,
+            role=getattr(user.role, "value", user.role),
+            is_active=user.is_active,
+            is_verified=user.is_verified,
+            created_at=user.created_at,
+            last_login=user.last_login,
+        )
 
     @staticmethod
     async def get_user_by_email(db: AsyncSession, email: str) -> User:
         res = await db.execute(select(UserDB).where(UserDB.email == email))
-        db_user = res.scalars().first()
-        if not db_user:
+        user = res.scalars().first()
+        if not user:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
-        return User.model_validate(db_user)
+        return User(
+            id=user.id,
+            email=user.email,
+            full_name=user.full_name,
+            role=getattr(user.role, "value", user.role),
+            is_active=user.is_active,
+            is_verified=user.is_verified,
+            created_at=user.created_at,
+            last_login=user.last_login,
+        )
 
     @staticmethod
     async def list_users(db: AsyncSession):
@@ -112,22 +138,34 @@ class AuthService:
 
     @staticmethod
     async def list_specialists(db: AsyncSession) -> List[User]:
-        # Même logique que ton code initial, en async
         res = await db.execute(
             select(UserDB).where(
                 UserDB.is_active == True,  # noqa: E712
-                UserDB.role.in_(["orthodontiste", "anatomopathologiste", "oncologue", "radiologue"]),
+                UserDB.role.in_(AuthService._specialist_roles()),
             )
         )
         specialists = res.scalars().all()
-        return [User.model_validate(s) for s in specialists]
+
+        return [
+            User(
+                id=s.id,
+                email=s.email,
+                full_name=s.full_name,
+                role=getattr(s.role, "value", s.role),
+                is_active=s.is_active,
+                is_verified=s.is_verified,
+                created_at=s.created_at,
+                last_login=s.last_login,
+            )
+            for s in specialists
+        ]
 
     @staticmethod
     async def count_specialists(db: AsyncSession) -> dict:
         res = await db.execute(
             select(UserDB.id).where(
                 UserDB.is_active == True,  # noqa: E712
-                UserDB.role.in_(["orthodontiste", "anatomopathologiste", "oncologue", "radiologue"]),
+                UserDB.role.in_(AuthService._specialist_roles()),
             )
         )
         count = len(res.scalars().all())
