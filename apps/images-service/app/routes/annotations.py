@@ -4,114 +4,129 @@ from sqlalchemy import select
 from app.models.annotation import Annotation, AnnotationCreate, AnnotationDB
 from typing import List
 import json
+from datetime import datetime, timezone
 
 
 router = APIRouter(prefix="/annotations", tags=["Annotations"])
 
+
 def get_db_override():
     raise RuntimeError("get_db not injected")
 
+
 def get_current_user_override():
-    raise RuntimeError("current_user not injected")
+    raise RuntimeError("get_current_user not injected")
+
 
 def router_api():
     return router
 
-@router.post("/", response_model=Annotation, status_code=201)
-async def create_annotation(annotation_data: AnnotationCreate, db: AsyncSession = Depends(get_db_override), current_user = Depends(get_current_user_override)):
+
+def _json_loads_safe(value, fallback):
+    if value is None:
+        return fallback
+    if isinstance(value, (dict, list)):
+        return value
+    if isinstance(value, str):
+        try:
+            return json.loads(value)
+        except Exception:
+            return fallback
+    return fallback
+
+
+def _serialize_annotation(db_annotation: AnnotationDB) -> Annotation:
+    stroke_width = None
+    try:
+        stroke_width = float(db_annotation.stroke_width) if db_annotation.stroke_width is not None else None
+    except Exception:
+        stroke_width = None
+
+    return Annotation(
+        id=db_annotation.id,
+        image_id=db_annotation.image_id,
+        case_id=db_annotation.case_id,
+        user_id=db_annotation.user_id,
+        owner_name=db_annotation.owner_name,
+        type=db_annotation.type,
+        coordinates=_json_loads_safe(db_annotation.coordinates, {}),
+        label=db_annotation.label,
+        severity=db_annotation.severity,
+        category=db_annotation.category,
+        description=db_annotation.description,
+        recommendation=db_annotation.recommendation,
+        tags=_json_loads_safe(db_annotation.tags, []),
+        stroke_color=db_annotation.stroke_color,
+        fill_color=db_annotation.fill_color,
+        stroke_width=stroke_width,
+        confidence=db_annotation.confidence,
+        notes=db_annotation.notes,
+        created_at=db_annotation.created_at,
+        updated_at=db_annotation.updated_at,
+    )
+
+
+def _extract_current_user(current_user):
+    user_id = (
+        getattr(current_user, "id", None)
+        or getattr(current_user, "email", None)
+        or getattr(current_user, "sub", None)
+    )
+    owner_name = (
+        getattr(current_user, "full_name", None)
+        or getattr(current_user, "name", None)
+        or user_id
+    )
+
+    if not user_id:
+        raise HTTPException(status_code=401, detail="Invalid current user")
+
+    return str(user_id), str(owner_name) if owner_name else None
+
+
+@router.post("/", response_model=Annotation, status_code=status.HTTP_201_CREATED)
+async def create_annotation(
+    annotation_data: AnnotationCreate,
+    db: AsyncSession = Depends(get_db_override),
+    current_user=Depends(get_current_user_override),
+):
+    user_id, owner_name = _extract_current_user(current_user)
+
     db_annotation = AnnotationDB(
         image_id=annotation_data.image_id,
         case_id=annotation_data.case_id,
-        user_id=current_user.id,              
+        user_id=user_id,
+        owner_name=owner_name,
         type=annotation_data.type,
         label=annotation_data.label,
+        severity=annotation_data.severity,
+        category=annotation_data.category,
+        description=annotation_data.description,
+        recommendation=annotation_data.recommendation,
+        tags=json.dumps(annotation_data.tags or []),
+        stroke_color=annotation_data.stroke_color,
+        fill_color=annotation_data.fill_color,
+        stroke_width=str(annotation_data.stroke_width) if annotation_data.stroke_width is not None else None,
         confidence=annotation_data.confidence,
         notes=annotation_data.notes,
         coordinates=json.dumps(annotation_data.coordinates),
+        created_at=datetime.now(timezone.utc),
+        updated_at=datetime.now(timezone.utc),
     )
 
     db.add(db_annotation)
     await db.commit()
     await db.refresh(db_annotation)
 
-    coords = getattr(db_annotation, "coordinates", None)
-    if isinstance(coords, str):
-        try:
-            db_annotation.coordinates = json.loads(coords)
-        except Exception:
-            # Option: raise 400 plutôt qu'un 500
-            raise HTTPException(status_code=400, detail="Invalid coordinates JSON")    
-        
-    annotation_dict = Annotation.model_validate(db_annotation).model_dump()
-
-    annotation_dict["coordinates"] = json.loads(db_annotation.coordinates)
-    return Annotation(**annotation_dict)
-
-
-@router.put("/{annotation_id}", response_model=Annotation)
-async def update_annotation(annotation_id: str, annotation_data: AnnotationCreate, db: AsyncSession = Depends(get_db_override), current_user = Depends(get_current_user_override)):
-    result = await db.execute(select(AnnotationDB).where(AnnotationDB.id == annotation_id))
-    ann = result.scalar_one_or_none()
-    if not ann:
-        raise HTTPException(status_code=404, detail="Annotation not found")
-
-    if ann.user_id != current_user.id:
-        raise HTTPException(status_code=403, detail="Not authorized to update this annotation")
-
-    ann.image_id = annotation_data.image_id
-    ann.case_id = annotation_data.case_id
-    ann.type = annotation_data.type
-    ann.label = annotation_data.label
-    ann.confidence = annotation_data.confidence
-    ann.notes = annotation_data.notes
-    ann.coordinates = json.dumps(annotation_data.coordinates)
-
-    await db.commit()
-    await db.refresh(ann)
-
-    out = Annotation.model_validate(ann).model_dump()
-    out["coordinates"] = json.loads(ann.coordinates)
-    return Annotation(**out)
-
-
-@router.delete("/{annotation_id}", status_code=204)
-async def delete_annotation(annotation_id: str, db: AsyncSession = Depends(get_db_override), current_user = Depends(get_current_user_override)):
-    result = await db.execute(select(AnnotationDB).where(AnnotationDB.id == annotation_id))
-    ann = result.scalar_one_or_none()
-    if not ann:
-        raise HTTPException(status_code=404, detail="Annotation not found")
-
-    if ann.user_id != current_user.id:
-        raise HTTPException(status_code=403, detail="Not authorized to delete this annotation")
-
-    await db.delete(ann)
-    await db.commit()
-    return
+    return _serialize_annotation(db_annotation)
 
 
 @router.get("/image/{image_id}", response_model=List[Annotation])
 async def get_image_annotations(image_id: str, db: AsyncSession = Depends(get_db_override)):
-    """Récupérer toutes les annotations d'une image"""
-    result = await db.execute(select(AnnotationDB).where(AnnotationDB.image_id == image_id))
+    result = await db.execute(
+        select(AnnotationDB)
+        .where(AnnotationDB.image_id == image_id)
+        .order_by(AnnotationDB.created_at.desc())
+    )
     annotations = result.scalars().all()
-
-    out = []
-    for ann in annotations:
-        ann_dict = Annotation.model_validate(ann).model_dump()
-        ann_dict["coordinates"] = json.loads(ann.coordinates)
-        out.append(Annotation(**ann_dict))
-    return out
-
-
-@router.get("/case/{case_id}", response_model=List[Annotation])
-async def get_case_annotations(case_id: str, db: AsyncSession = Depends(get_db_override)):
-    """Récupérer toutes les annotations d'un cas"""
-    result = await db.execute(select(AnnotationDB).where(AnnotationDB.case_id == case_id))
-    annotations = result.scalars().all()
-
-    out = []
-    for ann in annotations:
-        ann_dict = Annotation.model_validate(ann).model_dump()
-        ann_dict["coordinates"] = json.loads(ann.coordinates)
-        out.append(Annotation(**ann_dict))
-    return out
+    return [_serialize_annotation(ann) for ann in annotations]

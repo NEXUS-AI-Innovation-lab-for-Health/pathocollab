@@ -8,7 +8,13 @@ export type AnnotationCategory =
     | "Artefact"
     | "Autre";
 
-export interface BaseAnnotation {
+export interface DrawStyle {
+    strokeColor?: string | null;
+    fillColor?: string | null;
+    strokeWidth?: number | null;
+}
+
+export interface BaseAnnotation extends DrawStyle {
     id: string;
     type: AnnotationType;
 
@@ -21,6 +27,9 @@ export interface BaseAnnotation {
 
     ownerId?: string | null;
     ownerName?: string | null;
+
+    confidence?: string | null;
+    notes?: string | null;
 
     createdAt: string;
     updatedAt?: string | null;
@@ -54,7 +63,4 @@ export interface PolygonAnnotation extends BaseAnnotation {
     points: PolygonPoint[];
 }
 
-export type Annotation =
-    | RectAnnotation
-    | CircleAnnotation
-    | PolygonAnnotation;
+export type Annotation = RectAnnotation | CircleAnnotation | PolygonAnnotation;

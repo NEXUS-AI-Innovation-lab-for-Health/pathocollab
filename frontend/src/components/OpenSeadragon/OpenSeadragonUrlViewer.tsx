@@ -26,12 +26,14 @@ import {
   drawOnReleaseRect,
   type DragState as RectDragState,
 } from "./drawRect";
+
 import {
   drawOnPressCircle,
   drawOnDragCircle,
   drawOnReleaseCircle,
   type DragState as CircleDragState,
 } from "./drawCircle";
+
 import {
   polygonAddPoint,
   polygonMove,
@@ -79,6 +81,105 @@ type ApiAnnotationRow = {
   coordinates: Record<string, any>;
 };
 
+function inferShapeTypeFromCoordinates(
+  coords: Record<string, any> | null | undefined,
+): AnnotationType {
+  if (!coords || typeof coords !== "object") return "rect";
+
+  if (Array.isArray(coords.points)) return "polygon";
+  if (
+    typeof coords.cx === "number" &&
+    typeof coords.cy === "number" &&
+    typeof coords.rx === "number" &&
+    typeof coords.ry === "number"
+  ) {
+    return "circle";
+  }
+  if (
+    typeof coords.x === "number" &&
+    typeof coords.y === "number" &&
+    typeof coords.w === "number" &&
+    typeof coords.h === "number"
+  ) {
+    return "rect";
+  }
+
+  if (coords.shape_type === "polygon") return "polygon";
+  if (coords.shape_type === "circle") return "circle";
+  return "rect";
+}
+
+function mapApiAnnotationToFrontend(a: ApiAnnotationRow): Annotation | null {
+  const coords =
+    a.coordinates && typeof a.coordinates === "object" ? a.coordinates : {};
+
+  const shapeType = inferShapeTypeFromCoordinates(coords);
+
+  const base: BaseAnnotation = {
+    id: a.id,
+    type: shapeType,
+    label: a.label ?? null,
+    category: a.category ?? null,
+    severity: (a.severity ?? "Moyenne") as Severity,
+    description: a.description ?? null,
+    recommendation: a.recommendation ?? null,
+    tags: Array.isArray(a.tags) ? a.tags : [],
+    ownerId: a.owner_id ?? null,
+    ownerName: a.owner_name ?? null,
+    createdAt: (a.created_at ?? a.createdAt ?? new Date().toISOString()) as string,
+    updatedAt: (a.updated_at ?? a.updatedAt ?? null) as string | null,
+    _source: "api",
+    confidence: null,
+    notes: null,
+  };
+
+  if (shapeType === "rect") {
+    if (
+      typeof coords.x !== "number" ||
+      typeof coords.y !== "number" ||
+      typeof coords.w !== "number" ||
+      typeof coords.h !== "number"
+    ) {
+      return null;
+    }
+    return {
+      ...base,
+      type: "rect",
+      x: coords.x,
+      y: coords.y,
+      w: coords.w,
+      h: coords.h,
+    };
+  }
+
+  if (shapeType === "circle") {
+    if (
+      typeof coords.cx !== "number" ||
+      typeof coords.cy !== "number" ||
+      typeof coords.rx !== "number" ||
+      typeof coords.ry !== "number"
+    ) {
+      return null;
+    }
+    return {
+      ...base,
+      type: "circle",
+      cx: coords.cx,
+      cy: coords.cy,
+      rx: coords.rx,
+      ry: coords.ry,
+    };
+  }
+
+  if (!Array.isArray(coords.points)) return null;
+
+  return {
+    ...base,
+    type: "polygon",
+    points: coords.points,
+  };
+}
+
 export default function OpenSeadragonUrlViewer(
   props: OpenSeadragonUrlViewerProps,
 ) {
@@ -98,9 +199,13 @@ export default function OpenSeadragonUrlViewer(
   const [annotations, setAnnotations] = useState<Annotation[]>([]);
   const [annotateMode, setAnnotateMode] = useState<boolean>(false);
   const [drawTool, setDrawTool] = useState<DrawTool>("rect");
+  
+  const [drawSettingsOpen, setDrawSettingsOpen] = useState(false);
+  const [drawStrokeColor, setDrawStrokeColor] = useState("#ff3b30");
+  const [drawFillColor, setDrawFillColor] = useState("rgba(255,59,48,0.08)");
+  const [drawStrokeWidth, setDrawStrokeWidth] = useState(2);
 
-  const [selectedAnnotation, setSelectedAnnotation] =
-    useState<Annotation | null>(null);
+  const [selectedAnnotation, setSelectedAnnotation] = useState<Annotation | null>(null);
   const [detailOpen, setDetailOpen] = useState(false);
   const [formMode, setFormMode] = useState<"create" | "view" | "edit">(
     "create",
@@ -201,6 +306,94 @@ export default function OpenSeadragonUrlViewer(
     return (await res.json()) as ApiAnnotationRow[];
   }
 
+  function inferShapeTypeFromCoordinates(
+    coords: Record<string, any> | null | undefined,
+  ): AnnotationType {
+    if (!coords || typeof coords !== "object") return "rect";
+
+    if (coords.shape_type === "polygon" || Array.isArray(coords.points)) {
+      return "polygon";
+    }
+
+    if (
+      coords.shape_type === "circle" ||
+      (
+        typeof coords.cx === "number" &&
+        typeof coords.cy === "number" &&
+        typeof coords.rx === "number" &&
+        typeof coords.ry === "number"
+      )
+    ) {
+      return "circle";
+    }
+
+    return "rect";
+  }
+
+  function mapApiAnnotationToFrontend(a: ApiAnnotationRow): Annotation | null {
+    const coords =
+      a.coordinates && typeof a.coordinates === "object" ? a.coordinates : {};
+
+    const shapeType = inferShapeTypeFromCoordinates(coords);
+
+    const base: BaseAnnotation = {
+      id: a.id,
+      type: shapeType,
+      label: a.label ?? null,
+      category: a.category ?? null,
+      severity: (a.severity ?? "Moyenne") as Severity,
+      description: a.description ?? null,
+      recommendation: a.recommendation ?? null,
+      tags: Array.isArray(a.tags) ? a.tags : [],
+      ownerId: a.owner_id ?? null,
+      ownerName: a.owner_name ?? null,
+      strokeColor: (a as any).stroke_color ?? "#ff3b30",
+      fillColor: (a as any).fill_color ?? "rgba(255,59,48,0.08)",
+      strokeWidth:
+        typeof (a as any).stroke_width === "number"
+          ? (a as any).stroke_width
+          : Number((a as any).stroke_width ?? 2),
+      createdAt: (a.created_at ?? a.createdAt ?? new Date().toISOString()) as string,
+      updatedAt: (a.updated_at ?? a.updatedAt ?? null) as string | null,
+      _source: "api",
+      confidence: null,
+      notes: null,
+    };
+
+    if (shapeType === "rect") {
+      if (
+        typeof coords.x !== "number" ||
+        typeof coords.y !== "number" ||
+        typeof coords.w !== "number" ||
+        typeof coords.h !== "number"
+      ) return null;
+
+      return { ...base, type: "rect", x: coords.x, y: coords.y, w: coords.w, h: coords.h };
+    }
+
+    if (shapeType === "circle") {
+      if (
+        typeof coords.cx !== "number" ||
+        typeof coords.cy !== "number" ||
+        typeof coords.rx !== "number" ||
+        typeof coords.ry !== "number"
+      ) return null;
+
+      return {
+        ...base,
+        type: "circle",
+        cx: coords.cx,
+        cy: coords.cy,
+        rx: coords.rx,
+        ry: coords.ry,
+      };
+    }
+
+    if (!Array.isArray(coords.points)) return null;
+
+    return { ...base, type: "polygon", points: coords.points };
+  }
+
   useEffect(() => {
     let cancelled = false;
 
@@ -214,56 +407,7 @@ export default function OpenSeadragonUrlViewer(
         const apiAnnotations = await fetchAnnotationsForImage(imageId);
         if (cancelled) return;
 
-        const mapped: Annotation[] = apiAnnotations.map((a) => {
-          const base: BaseAnnotation = {
-            id: a.id,
-            type: a.type,
-            label: a.label ?? null,
-            category: a.category ?? null,
-            severity: (a.severity ?? "Moyenne") as Severity,
-            description: a.description ?? null,
-            recommendation: a.recommendation ?? null,
-            tags: Array.isArray(a.tags) ? a.tags : [],
-            ownerId: a.owner_id ?? null,
-            ownerName: a.owner_name ?? null,
-            createdAt: (a.created_at ??
-              a.createdAt ??
-              new Date().toISOString()) as string,
-            updatedAt: (a.updated_at ?? a.updatedAt ?? null) as string | null,
-            _source: "api",
-          };
-
-          if (a.type === "rect") {
-            const c = a.coordinates as RectAnnotation;
-            return {
-              ...base,
-              type: "rect",
-              x: c.x,
-              y: c.y,
-              w: c.w,
-              h: c.h,
-            };
-          }
-
-          if (a.type === "circle") {
-            const c = a.coordinates as CircleAnnotation;
-            return {
-              ...base,
-              type: "circle",
-              cx: c.cx,
-              cy: c.cy,
-              rx: c.rx,
-              ry: c.ry,
-            };
-          }
-
-          const c = a.coordinates as { points: PolygonPoint[] };
-          return {
-            ...base,
-            type: "polygon",
-            points: Array.isArray(c.points) ? c.points : [],
-          };
-        });
+        const mapped: Annotation[] = apiAnnotations.map(mapApiAnnotationToFrontend).filter(Boolean) as Annotation[];
 
         setAnnotations(mapped);
         saveAnnotations(imageKey, mapped);
@@ -313,10 +457,25 @@ export default function OpenSeadragonUrlViewer(
   useEffect(() => {
     const viewer = viewerRef.current;
     if (!viewer) return;
-    if (!viewer.world || viewer.world.getItemCount() === 0) return;
 
-    redrawAll(viewer, [...annotations, ...draftAnnotations]);
-  }, [annotations, draftAnnotations]);
+    const draw = () => {
+      redrawAll(viewer, [...annotations, ...draftAnnotations]);
+    };
+
+    if (viewer.world && viewer.world.getItemCount() > 0) {
+      draw();
+    } else {
+      viewer.addOnceHandler("open", draw);
+    }
+
+    return () => {
+      try {
+        viewer.removeHandler("open", draw);
+      } catch {
+        // ignore
+      }
+    };
+  }, [annotations, draftAnnotations, sourceUrl]);
 
   useEffect(() => {
     const viewer = viewerRef.current;
@@ -588,8 +747,17 @@ export default function OpenSeadragonUrlViewer(
       image_id: imgId,
       case_id: cId,
       type: "manual",
-      label: ann.label ?? null,
+      label: ann.label ?? "",
       severity: ann.severity ?? "Moyenne",
+      category: ann.category ?? null,
+      description: ann.description ?? null,
+      recommendation: ann.recommendation ?? null,
+      tags: ann.tags ?? [],
+      stroke_color: ann.strokeColor ?? "#ff3b30",
+      fill_color: ann.fillColor ?? "rgba(255,59,48,0.08)",
+      stroke_width: ann.strokeWidth ?? 2,
+      confidence: ann.confidence ?? null,
+      notes: ann.notes ?? null,
       coordinates: buildCoordinatesPayload(ann),
     };
 
@@ -607,14 +775,38 @@ export default function OpenSeadragonUrlViewer(
       console.error("POST /api/annotations error:", res.status, text);
       throw new Error(`POST annotation failed: ${res.status} - ${text}`);
     }
+
     return await res.json();
   }
 
   function buildCoordinatesPayload(ann: Annotation): Record<string, any> {
-    if (ann.type === "rect") return { x: ann.x, y: ann.y, w: ann.w, h: ann.h };
-    if (ann.type === "circle")
-      return { cx: ann.cx, cy: ann.cy, rx: ann.rx, ry: ann.ry };
-    if (ann.type === "polygon") return { points: ann.points };
+    if (ann.type === "rect") {
+      return {
+        shape_type: "rect",
+        x: ann.x,
+        y: ann.y,
+        w: ann.w,
+        h: ann.h,
+      };
+    }
+
+    if (ann.type === "circle") {
+      return {
+        shape_type: "circle",
+        cx: ann.cx,
+        cy: ann.cy,
+        rx: ann.rx,
+        ry: ann.ry,
+      };
+    }
+
+    if (ann.type === "polygon") {
+      return {
+        shape_type: "polygon",
+        points: ann.points,
+      };
+    }
+
     return {};
   }
 
@@ -631,12 +823,13 @@ export default function OpenSeadragonUrlViewer(
       category: formCategory || null,
       description: formDescription.trim() || null,
       recommendation: formRecommendation.trim() || null,
-      tags: formTags
-        .split(",")
-        .map((t) => t.trim())
-        .filter(Boolean),
+      tags: formTags.split(",").map((t) => t.trim()).filter(Boolean),
+      notes: formDescription.trim() || null,
       ownerId: currentUser.id,
       ownerName: currentUser.name,
+      strokeColor: drawStrokeColor,
+      fillColor: drawFillColor,
+      strokeWidth: drawStrokeWidth,
       createdAt: pendingAnn.createdAt || new Date().toISOString(),
       updatedAt: new Date().toISOString(),
     };
@@ -669,6 +862,21 @@ export default function OpenSeadragonUrlViewer(
         ...nextAnn,
         id: saved.id as string,
         _source: "api",
+        ownerId: saved.user_id ?? nextAnn.ownerId,
+        ownerName: saved.owner_name ?? nextAnn.ownerName,
+        createdAt: saved.created_at ?? nextAnn.createdAt,
+        updatedAt: saved.updated_at ?? nextAnn.updatedAt,
+        severity: saved.severity ?? nextAnn.severity,
+        category: saved.category ?? nextAnn.category,
+        description: saved.description ?? nextAnn.description,
+        recommendation: saved.recommendation ?? nextAnn.recommendation,
+        tags: Array.isArray(saved.tags) ? saved.tags : nextAnn.tags,
+        strokeColor: saved.stroke_color ?? nextAnn.strokeColor,
+        fillColor: saved.fill_color ?? nextAnn.fillColor,
+        strokeWidth:
+          typeof saved.stroke_width === "number"
+            ? saved.stroke_width
+            : nextAnn.strokeWidth,
       };
 
       setAnnotations((prev) => {
@@ -686,11 +894,13 @@ export default function OpenSeadragonUrlViewer(
   };
 
   const annotationItems = useMemo(() => {
-    return [...annotations].sort((a, b) => {
-      const da = new Date(a.createdAt).getTime();
-      const db = new Date(b.createdAt).getTime();
-      return db - da;
-    });
+    return [...annotations]
+      .filter((a) => a && (a.type === "rect" || a.type === "circle" || a.type === "polygon"))
+      .sort((a, b) => {
+        const da = new Date(a.createdAt).getTime();
+        const db = new Date(b.createdAt).getTime();
+        return db - da;
+      });
   }, [annotations]);
 
   return (
@@ -739,6 +949,13 @@ export default function OpenSeadragonUrlViewer(
             onClick={() => setDrawTool("polygon")}
             icon={IconPolygon}
           />
+          <ToolButton
+            title="Paramètres de dessin"
+            active={drawSettingsOpen}
+            disabled={!canAnnotate}
+            onClick={() => setDrawSettingsOpen((v) => !v)}
+            icon={IconSliders}
+          />
         </div>
 
         {drawTool === "polygon" && annotateMode && (
@@ -761,6 +978,56 @@ export default function OpenSeadragonUrlViewer(
               />
             </div>
           </>
+        )}
+
+        {drawSettingsOpen && (
+          <div
+            style={{
+              display: "grid",
+              gridTemplateColumns: "1fr 1fr 1fr",
+              gap: 12,
+              padding: 12,
+              border: "1px solid #e6e6e6",
+              borderRadius: 10,
+              background: "#fff",
+            }}
+          >
+            <label style={modalStyles.label}>
+              Couleur ligne
+              <input
+                type="color"
+                value={toColorInput(drawStrokeColor)}
+                onChange={(e) => setDrawStrokeColor(e.target.value)}
+                style={styles.colorInput}
+              />
+            </label>
+
+            <label style={modalStyles.label}>
+              Couleur fond
+              <input
+                type="color"
+                value={toColorInput(drawFillColor)}
+                onChange={(e) => {
+                  const hex = e.target.value;
+                  setDrawFillColor(hexToRgba(hex, 0.18));
+                }}
+                style={styles.colorInput}
+              />
+            </label>
+
+            <label style={modalStyles.label}>
+              Épaisseur ligne
+              <input
+                type="range"
+                min={1}
+                max={8}
+                step={1}
+                value={drawStrokeWidth}
+                onChange={(e) => setDrawStrokeWidth(Number(e.target.value))}
+              />
+              <span>{drawStrokeWidth}px</span>
+            </label>
+          </div>
         )}
 
         <div style={{ flex: 1 }} />
@@ -1083,8 +1350,8 @@ function redrawAll(
       const el = document.createElement("div");
       el.style.boxSizing = "border-box";
       el.style.pointerEvents = "none";
-      el.style.border = "2px solid #ff3b30";
-      el.style.background = "rgba(255,59,48,0.08)";
+      el.style.border = `${ann.strokeWidth ?? 2}px solid ${ann.strokeColor ?? "#ff3b30"}`;
+      el.style.background = ann.fillColor ?? "rgba(255,59,48,0.08)";
       el.dataset.kind = "persisted";
 
       viewer.addOverlay({
@@ -1100,8 +1367,8 @@ function redrawAll(
       const el = document.createElement("div");
       el.style.boxSizing = "border-box";
       el.style.pointerEvents = "none";
-      el.style.border = "2px solid #ff3b30";
-      el.style.background = "rgba(255,59,48,0.08)";
+      el.style.border = `${ann.strokeWidth ?? 2}px solid ${ann.strokeColor ?? "#ff3b30"}`;
+      el.style.background = ann.fillColor ?? "rgba(255,59,48,0.08)";
       el.style.borderRadius = "9999px";
       el.dataset.kind = "persisted";
 
@@ -1152,8 +1419,12 @@ function redrawAll(
 
       const poly = document.createElementNS(svgNS, "polygon");
       poly.setAttribute("fill", "rgba(255,0,0,0.30)");
-      poly.setAttribute("stroke", "#ff0000");
-      poly.setAttribute("stroke-width", "0.0012");
+      poly.setAttribute("fill", ann.fillColor ?? "rgba(255,59,48,0.18)");
+      poly.setAttribute("stroke", ann.strokeColor ?? "#ff3b30");
+      poly.setAttribute(
+        "stroke-width",
+        String(Math.max(0.0006, (ann.strokeWidth ?? 2) * 0.0006)),
+      );
       poly.setAttribute("stroke-linejoin", "round");
       poly.setAttribute(
         "points",
@@ -1428,6 +1699,14 @@ const modalStyles: Record<string, React.CSSProperties> = {
     border: "1px solid #ddd",
     resize: "vertical",
   },
+  colorInput: {
+    width: "100%",
+    height: 40,
+    border: "1px solid #ddd",
+    borderRadius: 8,
+    padding: 4,
+    background: "#fff",
+  },
 };
 
 const formGridStyles: Record<string, React.CSSProperties> = {
@@ -1493,6 +1772,17 @@ function IconPolygon() {
   );
 }
 
+function IconSliders() {
+  return (
+    <svg width="18" height="18" viewBox="0 0 18 18" aria-hidden="true">
+      <path d="M4 5h10M4 9h10M4 13h10" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+      <circle cx="7" cy="5" r="1.6" fill="currentColor" />
+      <circle cx="11" cy="9" r="1.6" fill="currentColor" />
+      <circle cx="6" cy="13" r="1.6" fill="currentColor" />
+    </svg>
+  );
+}
+
 function IconPencil() {
   return (
     <svg width="18" height="18" viewBox="0 0 18 18" aria-hidden="true">
@@ -1547,4 +1837,26 @@ function IconTrash() {
       />
     </svg>
   );
+}
+
+function hexToRgba(hex: string, alpha: number) {
+  const normalized = hex.replace("#", "");
+  const bigint = parseInt(normalized, 16);
+  const r = (bigint >> 16) & 255;
+  const g = (bigint >> 8) & 255;
+  const b = bigint & 255;
+  return `rgba(${r},${g},${b},${alpha})`;
+}
+
+function toColorInput(color: string) {
+  if (!color) return "#ff3b30";
+  if (color.startsWith("#")) return color;
+
+  const match = color.match(/rgba?\((\d+),\s*(\d+),\s*(\d+)/i);
+  if (!match) return "#ff3b30";
+
+  const r = Number(match[1]).toString(16).padStart(2, "0");
+  const g = Number(match[2]).toString(16).padStart(2, "0");
+  const b = Number(match[3]).toString(16).padStart(2, "0");
+  return `#${r}${g}${b}`;
 }
