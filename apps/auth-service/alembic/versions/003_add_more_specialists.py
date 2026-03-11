@@ -21,15 +21,16 @@ def upgrade() -> None:
     conn = op.get_bind()
 
     pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
-    hashed_password = pwd_context.hash("password123")
+    hashed_password_louna = pwd_context.hash("louna1234")
+    hashed_password_jack = pwd_context.hash("jack1234")
     now = datetime.now(timezone.utc)
 
     users_to_add = [
         {
             "id": str(uuid.uuid4()),
-            "email": "dr.johnson@pixtral.fr",
-            "hashed_password": hashed_password,
-            "full_name": "Dr. Johnson",
+            "email": "louna@gmail.com",
+            "hashed_password": hashed_password_louna,
+            "full_name": "Dr. Louna",
             "role": "oncologue",
             "is_active": True,
             "is_verified": True,
@@ -38,10 +39,10 @@ def upgrade() -> None:
         },
         {
             "id": str(uuid.uuid4()),
-            "email": "dr.williams@pixtral.fr",
-            "hashed_password": hashed_password,
-            "full_name": "Dr. Williams",
-            "role": "anatomopathologiste",
+            "email": "jack@gmail.com",
+            "hashed_password": hashed_password_jack,
+            "full_name": "Dr. Jack",
+            "role": "radiologue",
             "is_active": True,
             "is_verified": True,
             "created_at": now,
@@ -89,6 +90,6 @@ def downgrade() -> None:
     conn = op.get_bind()
     conn.execute(
         sa.text(
-            "DELETE FROM users WHERE email IN ('dr.johnson@pixtral.fr', 'dr.williams@pixtral.fr')"
+            "DELETE FROM users WHERE email IN ('louna@gmail.com', 'jack@gmail.com')"
         )
     )

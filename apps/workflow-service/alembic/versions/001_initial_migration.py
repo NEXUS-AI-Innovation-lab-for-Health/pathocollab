@@ -20,7 +20,6 @@ notification_type_enum = postgresql.ENUM(
 
 
 def upgrade() -> None:
-    # créer le type seulement s'il n'existe pas déjà
     op.execute("""
     DO $$
     BEGIN
@@ -40,6 +39,27 @@ def upgrade() -> None:
     END
     $$;
     """)
+
+    op.create_table(
+        "workflows",
+        sa.Column("id", sa.String(), nullable=False),
+        sa.Column("case_id", sa.String(), nullable=False),
+        sa.Column("specialists_order", sa.Text(), nullable=False, server_default="[]"),
+        sa.Column("current_step", sa.Integer(), nullable=False, server_default="0"),
+        sa.Column("workflow_engine", sa.String(), nullable=False, server_default="local"),
+        sa.Column("olga_workflow_code", sa.String(), nullable=True),
+        sa.Column("olga_session_id", sa.String(), nullable=True),
+        sa.Column("olga_status", sa.String(), nullable=True),
+        sa.Column("is_completed", sa.Boolean(), nullable=False, server_default=sa.text("false")),
+        sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
+        sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False),
+        sa.Column("completed_at", sa.DateTime(timezone=True), nullable=True),
+        sa.PrimaryKeyConstraint("id"),
+        sa.UniqueConstraint("case_id"),
+    )
+
+    op.create_index(op.f("ix_workflows_case_id"), "workflows", ["case_id"], unique=True)
+    op.create_index(op.f("ix_workflows_olga_session_id"), "workflows", ["olga_session_id"], unique=False)
 
     op.create_table(
         "notifications",
@@ -62,4 +82,9 @@ def downgrade() -> None:
     op.drop_index(op.f("ix_notifications_case_id"), table_name="notifications")
     op.drop_index(op.f("ix_notifications_user_id"), table_name="notifications")
     op.drop_table("notifications")
+
+    op.drop_index(op.f("ix_workflows_olga_session_id"), table_name="workflows")
+    op.drop_index(op.f("ix_workflows_case_id"), table_name="workflows")
+    op.drop_table("workflows")
+
     op.execute("DROP TYPE IF EXISTS notification_type")

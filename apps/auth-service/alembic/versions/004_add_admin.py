@@ -4,8 +4,8 @@ import uuid
 from datetime import datetime, timezone
 from passlib.context import CryptContext
 
-revision = "002"
-down_revision = "001"
+revision = "004"
+down_revision = "003"
 branch_labels = None
 depends_on = None
 
@@ -13,11 +13,11 @@ def upgrade():
     conn = op.get_bind()
 
     pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
-    hashed_password = pwd_context.hash("smith1234")
+    hashed_password = pwd_context.hash("admin1234")
 
     existing_user = conn.execute(
         sa.text("SELECT id FROM users WHERE email = :email"),
-        {"email": "smith@gmail.com"}
+        {"email": "admin@gmail.com"}
     ).fetchone()
 
     if not existing_user:
@@ -50,10 +50,10 @@ def upgrade():
             """),
             {
                 "id": str(uuid.uuid4()),
-                "email": "smith@gmail.com",
+                "email": "admin@gmail.com",
                 "hashed_password": hashed_password,
-                "full_name": "Dr. Smith",
-                "role": "anatomopathologiste",
+                "full_name": "Administrateur",
+                "role": "admin",
                 "is_active": True,
                 "is_verified": True,
                 "created_at": datetime.now(timezone.utc),
@@ -66,5 +66,5 @@ def downgrade():
     conn = op.get_bind()
     conn.execute(
         sa.text("DELETE FROM users WHERE email = :email"),
-        {"email": "smith@gmail.com"}
+        {"email": "admin@gmail.com"}
     )

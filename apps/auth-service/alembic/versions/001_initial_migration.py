@@ -21,7 +21,7 @@ def upgrade() -> None:
         sa.Column('email', sa.String(), nullable=False),
         sa.Column('hashed_password', sa.String(), nullable=False),
         sa.Column('full_name', sa.String(), nullable=False),
-        sa.Column('role', sa.Enum('admin', 'anatomopathologiste', 'oncologue', name='userrole'), nullable=False),
+        sa.Column('role', sa.Enum('admin', 'anatomopathologiste', 'oncologue', 'radiologue', name='userrole'), nullable=False),
         sa.Column('is_active', sa.Boolean(), nullable=True, default=True),
         sa.Column('is_verified', sa.Boolean(), nullable=True, default=False),
         sa.Column('created_at', sa.DateTime(timezone=True), nullable=True),
