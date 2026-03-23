@@ -45,6 +45,9 @@ const IMAGES_API =
   process.env.REACT_APP_IMAGES_API?.trim() ||
   `${window.location.protocol}//${window.location.hostname}:8004`;
 
+const OLGA_API =
+  process.env.REACT_APP_OLGA_API?.trim() || "http://localhost:9091";
+
 type SourceType = "dzi" | "image";
 type DrawTool = AnnotationType;
 type Severity = NonNullable<BaseAnnotation["severity"]>;
@@ -79,6 +82,36 @@ type ApiAnnotationRow = {
   updated_at?: string | null;
   updatedAt?: string | null;
   coordinates: Record<string, any>;
+};
+
+type OlgaFieldOption = {
+  label?: string;
+  value?: string;
+};
+
+type OlgaField = {
+  unique_id?: string;
+  field_key: string;
+  field_label?: string;
+  field_type: string;
+  field_required?: boolean;
+  field_hint?: string;
+  field_mode?: string;
+  field_events?: Record<string, any>;
+  options?: Array<{ label?: string; value?: string }>;
+  field_options?: {
+    source?: string;
+    values?: string[];
+    options?: Array<{ label?: string; value?: string }>;
+  };
+};
+
+type OlgaFormResponse = {
+  form_version?: string;
+  models?: string[];
+  form_label?: string;
+  last_updated?: string;
+  form?: OlgaField[];
 };
 
 function inferShapeTypeFromCoordinates(
@@ -140,12 +173,10 @@ export default function OpenSeadragonUrlViewer(
     "create",
   );
 
-  const [formLabel, setFormLabel] = useState("");
-  const [formSeverity, setFormSeverity] = useState<Severity>("Moyenne");
-  const [formCategory, setFormCategory] = useState<AnnotationCategory | "">("");
-  const [formDescription, setFormDescription] = useState("");
-  const [formRecommendation, setFormRecommendation] = useState("");
-  const [formTags, setFormTags] = useState("");
+  const [olgaForm, setOlgaForm] = useState<OlgaFormResponse | null>(null);
+  const [olgaFormLoading, setOlgaFormLoading] = useState(false);
+  const [olgaFormError, setOlgaFormError] = useState<string | null>(null);
+  const [formValues, setFormValues] = useState<Record<string, any>>({});
 
   const dragRef = useRef<DragRefState>({
     active: false,
@@ -181,22 +212,127 @@ export default function OpenSeadragonUrlViewer(
     return !!current.id && ann.ownerId === current.id;
   }
 
+  function getOlgaFieldLabel(field: OlgaField) {
+    return field.field_label?.trim() || field.field_key;
+  }
+
+  function normalizeFieldKey(key: string) {
+    return key.trim().toLowerCase();
+  }
+
+  function getFieldValue(key: string, fallback: any = "") {
+    return formValues[key] ?? fallback;
+  }
+
+  function setFieldValue(key: string, value: any) {
+    setFormValues((prev) => ({ ...prev, [key]: value }));
+  }
+
+  function buildDefaultValuesFromOlgaForm(form?: OlgaFormResponse | null) {
+    const values: Record<string, any> = {};
+
+    for (const field of form?.form || []) {
+      const type = field.field_type?.toLowerCase?.() || "";
+      values[field.field_key] = type.includes("checkbox") ? false : "";
+    }
+
+    return values;
+  }
+
+  function extractAnnotationPayloadFromForm(values: Record<string, any>) {
+    const entries = Object.entries(values).reduce<Record<string, any>>(
+      (acc, [key, value]) => {
+        acc[normalizeFieldKey(key)] = value;
+        return acc;
+      },
+      {},
+    );
+
+    const label =
+      entries.label ??
+      entries.nom ??
+      entries.title ??
+      entries.titre ??
+      "";
+
+    const severity =
+      entries.severity ??
+      entries.severite ??
+      entries["sévérité"] ??
+      "Moyenne";
+
+    const category =
+      entries.category ??
+      entries.categorie ??
+      entries["catégorie"] ??
+      "";
+
+    const description =
+      entries.description ??
+      entries.commentaire ??
+      entries.comment ??
+      "";
+
+    const recommendation =
+      entries.recommendation ??
+      entries.recommandation ??
+      entries.conclusion ??
+      "";
+
+    const tagsRaw =
+      entries.tags ??
+      entries.tag ??
+      entries.motscles ??
+      entries["mots-clés"] ??
+      entries["mot-clé"] ??
+      "";
+
+    const tags = Array.isArray(tagsRaw)
+      ? tagsRaw
+      : String(tagsRaw || "")
+          .split(",")
+          .map((t) => t.trim())
+          .filter(Boolean);
+
+    return {
+      label: String(label || "").trim() || null,
+      severity: String(severity || "Moyenne") as Severity,
+      category: (String(category || "") as AnnotationCategory) || null,
+      description: String(description || "").trim() || null,
+      recommendation: String(recommendation || "").trim() || null,
+      tags,
+    };
+  }
+
   function resetFormFields() {
-    setFormLabel("");
-    setFormSeverity("Moyenne");
-    setFormCategory("");
-    setFormDescription("");
-    setFormRecommendation("");
-    setFormTags("");
+    setFormValues(buildDefaultValuesFromOlgaForm(olgaForm));
   }
 
   function fillFormFromAnnotation(ann: Annotation) {
-    setFormLabel(ann.label || "");
-    setFormSeverity(ann.severity || "Moyenne");
-    setFormCategory((ann.category as AnnotationCategory) || "");
-    setFormDescription(ann.description || "");
-    setFormRecommendation(ann.recommendation || "");
-    setFormTags((ann.tags || []).join(", "));
+    const base = buildDefaultValuesFromOlgaForm(olgaForm);
+    const nextValues: Record<string, any> = { ...base };
+
+    for (const field of olgaForm?.form || []) {
+      const key = normalizeFieldKey(field.field_key);
+
+      if (["label", "nom", "title", "titre"].includes(key)) {
+        nextValues[field.field_key] = ann.label || "";
+      } else if (["severity", "severite", "sévérité"].includes(key)) {
+        nextValues[field.field_key] = ann.severity || "Moyenne";
+      } else if (["category", "categorie", "catégorie"].includes(key)) {
+        nextValues[field.field_key] = ann.category || "";
+      } else if (["description", "commentaire", "comment"].includes(key)) {
+        nextValues[field.field_key] = ann.description || "";
+      } else if (
+        ["recommendation", "recommandation", "conclusion"].includes(key)
+      ) {
+        nextValues[field.field_key] = ann.recommendation || "";
+      } else if (["tags", "tag", "motscles", "mots-clés", "mot-clé"].includes(key)) {
+        nextValues[field.field_key] = (ann.tags || []).join(", ");
+      }
+    }
+
+    setFormValues(nextValues);
   }
 
   function openAnnotationDetails(ann: Annotation) {
@@ -214,6 +350,48 @@ export default function OpenSeadragonUrlViewer(
     setFormMode("create");
     resetFormFields();
   }
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function loadOlgaForm() {
+      try {
+        setOlgaFormLoading(true);
+        setOlgaFormError(null);
+
+        const res = await fetch(
+          `${OLGA_API}/forms/getFromID/creationLabelPatho`,
+        );
+
+        if (!res.ok) {
+          const txt = await res.text().catch(() => "");
+          throw new Error(`Olga form fetch failed: ${res.status} - ${txt}`);
+        }
+
+        const data = (await res.json()) as OlgaFormResponse;
+        if (cancelled) return;
+
+        setOlgaForm(data);
+        setFormValues((prev) => {
+          const defaults = buildDefaultValuesFromOlgaForm(data);
+          return Object.keys(prev).length > 0 ? prev : defaults;
+        });
+      } catch (e: any) {
+        if (cancelled) return;
+        console.error("Erreur chargement formulaire Olga:", e);
+        setOlgaFormError("Impossible de charger le formulaire Olga");
+        setOlgaForm(null);
+      } finally {
+        if (!cancelled) setOlgaFormLoading(false);
+      }
+    }
+
+    void loadOlgaForm();
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   async function fetchAnnotationsForImage(
     imgId: string,
@@ -744,16 +922,18 @@ export default function OpenSeadragonUrlViewer(
 
     const currentUser = getCurrentUser();
 
+    const extracted = extractAnnotationPayloadFromForm(formValues);
+
     const nextAnn: Annotation = {
       ...pendingAnn,
       _source: normalizeSource((pendingAnn as any)?._source),
-      label: formLabel.trim() || null,
-      severity: formSeverity,
-      category: formCategory || null,
-      description: formDescription.trim() || null,
-      recommendation: formRecommendation.trim() || null,
-      tags: formTags.split(",").map((t) => t.trim()).filter(Boolean),
-      notes: formDescription.trim() || null,
+      label: extracted.label,
+      severity: extracted.severity,
+      category: extracted.category,
+      description: extracted.description,
+      recommendation: extracted.recommendation,
+      tags: extracted.tags,
+      notes: extracted.description,
       ownerId: currentUser.id,
       ownerName: currentUser.name,
       strokeColor: drawStrokeColor,
@@ -1089,81 +1269,142 @@ export default function OpenSeadragonUrlViewer(
             </div>
 
             <div style={formGridStyles.grid}>
-              <label style={modalStyles.label}>
-                Label
-                <input
-                  value={formLabel}
-                  onChange={(e) => setFormLabel(e.target.value)}
-                  style={modalStyles.input}
-                  disabled={formMode === "view"}
-                  placeholder="Ex: Zone tumorale suspecte"
-                />
-              </label>
+              {olgaFormLoading && (
+                <div style={{ gridColumn: "1 / -1", color: "#475569" }}>
+                  Chargement du formulaire Olga...
+                </div>
+              )}
 
-              <label style={modalStyles.label}>
-                Catégorie
-                <select
-                  value={formCategory}
-                  onChange={(e) => setFormCategory(e.target.value as any)}
-                  style={modalStyles.input}
-                  disabled={formMode === "view"}
-                >
-                  <option value="">Sélectionner</option>
-                  <option value="Zone suspecte">Zone suspecte</option>
-                  <option value="Nécrose">Nécrose</option>
-                  <option value="Inflammation">Inflammation</option>
-                  <option value="Tumeur">Tumeur</option>
-                  <option value="Artefact">Artefact</option>
-                  <option value="Autre">Autre</option>
-                </select>
-              </label>
+              {!olgaFormLoading && olgaFormError && (
+                <div style={{ gridColumn: "1 / -1", color: "#dc2626" }}>
+                  {olgaFormError}
+                </div>
+              )}
 
-              <label style={modalStyles.label}>
-                Sévérité
-                <select
-                  value={formSeverity}
-                  onChange={(e) => setFormSeverity(e.target.value as Severity)}
-                  style={modalStyles.input}
-                  disabled={formMode === "view"}
-                >
-                  <option value="Faible">Faible</option>
-                  <option value="Moyenne">Moyenne</option>
-                  <option value="Élevée">Élevée</option>
-                </select>
-              </label>
+              {!olgaFormLoading &&
+                !olgaFormError &&
+                (olgaForm?.form?.length ?? 0) > 0 && (
+                  <>
+                    {olgaForm!.form!.map((field) => {
+                      const type = field.field_type?.toLowerCase?.() || "";
+                      const label = getOlgaFieldLabel(field);
+                      const value = getFieldValue(field.field_key, "");
+                      const disabled = formMode === "view";
 
-              <label style={modalStyles.label}>
-                Tags
-                <input
-                  value={formTags}
-                  onChange={(e) => setFormTags(e.target.value)}
-                  style={modalStyles.input}
-                  disabled={formMode === "view"}
-                  placeholder="mitose, bordure, suspecte"
-                />
-              </label>
+                      if (type.includes("textarea")) {
+                        return (
+                          <label
+                            key={field.unique_id || field.field_key}
+                            style={{ ...modalStyles.label, gridColumn: "1 / -1" }}
+                          >
+                            {label}
+                            <textarea
+                              value={value}
+                              onChange={(e) =>
+                                setFieldValue(field.field_key, e.target.value)
+                              }
+                              style={modalStyles.textarea}
+                              disabled={disabled}
+                              placeholder={field.field_hint || ""}
+                            />
+                          </label>
+                        );
+                      }
 
-              <label style={{ ...modalStyles.label, gridColumn: "1 / -1" }}>
-                Description
-                <textarea
-                  value={formDescription}
-                  onChange={(e) => setFormDescription(e.target.value)}
-                  style={modalStyles.textarea}
-                  disabled={formMode === "view"}
-                  placeholder="Description détaillée de l’annotation"
-                />
-              </label>
+                      if (type.includes("select")) {
+                        const selectOptions =
+                          field.options ||
+                          field.field_options?.options ||
+                          field.field_options?.values?.map((v: any) => ({
+                            label: v,
+                            value: v,
+                          })) ||
+                          [];
 
-              <label style={{ ...modalStyles.label, gridColumn: "1 / -1" }}>
-                Recommandation / commentaire
-                <textarea
-                  value={formRecommendation}
-                  onChange={(e) => setFormRecommendation(e.target.value)}
-                  style={modalStyles.textarea}
-                  disabled={formMode === "view"}
-                  placeholder="Commentaire clinique ou recommandation"
-                />
-              </label>
+                        return (
+                          <label key={field.unique_id || field.field_key} style={modalStyles.label}>
+                            {label}
+                            <select
+                              value={value}
+                              onChange={(e) => setFieldValue(field.field_key, e.target.value)}
+                              style={modalStyles.input}
+                              disabled={disabled}
+                            >
+                              <option value="">Sélectionner</option>
+
+                              {selectOptions.map((opt: any, idx: number) => {
+                                const optionValue = opt.value ?? opt.label ?? "";
+                                const optionLabel = opt.label ?? opt.value ?? "";
+
+                                return (
+                                  <option
+                                    key={`${field.field_key}-${idx}`}
+                                    value={optionValue}
+                                  >
+                                    {optionLabel}
+                                  </option>
+                                );
+                              })}
+                            </select>
+                          </label>
+                        );
+                      }
+
+                      if (type.includes("checkbox")) {
+                        return (
+                          <label
+                            key={field.unique_id || field.field_key}
+                            style={{
+                              ...modalStyles.label,
+                              display: "flex",
+                              alignItems: "center",
+                              gap: 8,
+                              marginTop: 24,
+                            }}
+                          >
+                            <input
+                              type="checkbox"
+                              checked={!!value}
+                              onChange={(e) =>
+                                setFieldValue(field.field_key, e.target.checked)
+                              }
+                              disabled={disabled}
+                            />
+                            {label}
+                          </label>
+                        );
+                      }
+
+                      return (
+                        <label
+                          key={field.unique_id || field.field_key}
+                          style={modalStyles.label}
+                        >
+                          {label}
+                          <input
+                            type={type.includes("number") ? "number" : "text"}
+                            value={value}
+                            onChange={(e) =>
+                              setFieldValue(field.field_key, e.target.value)
+                            }
+                            style={modalStyles.input}
+                            disabled={disabled}
+                            placeholder={field.field_hint || ""}
+                          />
+                        </label>
+                      );
+                    })}
+                  </>
+                )}
+
+              {!olgaFormLoading &&
+                !olgaFormError &&
+                (!olgaForm?.form || olgaForm.form.length === 0) && (
+                  <div style={{ gridColumn: "1 / -1", color: "#64748b" }}>
+                    Aucun champ retourné par Olga pour le formulaire
+                    creationLabelPatho.
+                  </div>
+                )}
 
               {selectedAnnotation && (
                 <div style={formGridStyles.metaBox}>
@@ -1213,17 +1454,18 @@ export default function OpenSeadragonUrlViewer(
 
                     if (!selectedAnnotation || !imageKey) return;
 
+                    const extracted = extractAnnotationPayloadFromForm(
+                      formValues,
+                    );
+
                     const updated: Annotation = {
                       ...selectedAnnotation,
-                      label: formLabel.trim() || null,
-                      severity: formSeverity,
-                      category: formCategory || null,
-                      description: formDescription.trim() || null,
-                      recommendation: formRecommendation.trim() || null,
-                      tags: formTags
-                        .split(",")
-                        .map((t) => t.trim())
-                        .filter(Boolean),
+                      label: extracted.label,
+                      severity: extracted.severity,
+                      category: extracted.category,
+                      description: extracted.description,
+                      recommendation: extracted.recommendation,
+                      tags: extracted.tags,
                       updatedAt: new Date().toISOString(),
                     };
 
