@@ -109,77 +109,6 @@ function inferShapeTypeFromCoordinates(
   return "rect";
 }
 
-function mapApiAnnotationToFrontend(a: ApiAnnotationRow): Annotation | null {
-  const coords =
-    a.coordinates && typeof a.coordinates === "object" ? a.coordinates : {};
-
-  const shapeType = inferShapeTypeFromCoordinates(coords);
-
-  const base: BaseAnnotation = {
-    id: a.id,
-    type: shapeType,
-    label: a.label ?? null,
-    category: a.category ?? null,
-    severity: (a.severity ?? "Moyenne") as Severity,
-    description: a.description ?? null,
-    recommendation: a.recommendation ?? null,
-    tags: Array.isArray(a.tags) ? a.tags : [],
-    ownerId: a.owner_id ?? null,
-    ownerName: a.owner_name ?? null,
-    createdAt: (a.created_at ?? a.createdAt ?? new Date().toISOString()) as string,
-    updatedAt: (a.updated_at ?? a.updatedAt ?? null) as string | null,
-    _source: "api",
-    confidence: null,
-    notes: null,
-  };
-
-  if (shapeType === "rect") {
-    if (
-      typeof coords.x !== "number" ||
-      typeof coords.y !== "number" ||
-      typeof coords.w !== "number" ||
-      typeof coords.h !== "number"
-    ) {
-      return null;
-    }
-    return {
-      ...base,
-      type: "rect",
-      x: coords.x,
-      y: coords.y,
-      w: coords.w,
-      h: coords.h,
-    };
-  }
-
-  if (shapeType === "circle") {
-    if (
-      typeof coords.cx !== "number" ||
-      typeof coords.cy !== "number" ||
-      typeof coords.rx !== "number" ||
-      typeof coords.ry !== "number"
-    ) {
-      return null;
-    }
-    return {
-      ...base,
-      type: "circle",
-      cx: coords.cx,
-      cy: coords.cy,
-      rx: coords.rx,
-      ry: coords.ry,
-    };
-  }
-
-  if (!Array.isArray(coords.points)) return null;
-
-  return {
-    ...base,
-    type: "polygon",
-    points: coords.points,
-  };
-}
-
 export default function OpenSeadragonUrlViewer(
   props: OpenSeadragonUrlViewerProps,
 ) {
@@ -441,7 +370,7 @@ export default function OpenSeadragonUrlViewer(
 
     const viewer = OpenSeadragon({
       element: containerRef.current,
-      prefixUrl: `${window.location.origin}/assets/openseadragon-images/`,
+      prefixUrl: "/assets/openseadragon-images/",
       showNavigator: true,
       tileSources,
     });
@@ -1351,7 +1280,7 @@ function redrawAll(
       el.style.boxSizing = "border-box";
       el.style.pointerEvents = "none";
       el.style.border = `${ann.strokeWidth ?? 2}px solid ${ann.strokeColor ?? "#ff3b30"}`;
-      el.style.background = ann.fillColor ?? "rgba(255,59,48,0.08)";
+      el.style.background = ann.fillColor ?? "rgba(224, 56, 47, 0.76)";
       el.dataset.kind = "persisted";
 
       viewer.addOverlay({
