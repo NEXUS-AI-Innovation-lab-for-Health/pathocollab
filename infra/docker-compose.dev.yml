@@ -190,11 +190,84 @@ services:
     networks:
       - pixtral-network
 
+  olga-mysql:
+    image: mysql:8.0
+    container_name: PathoCollab-olga-mysql
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: rootpassword
+      MYSQL_DATABASE: olga
+      MYSQL_USER: olga_user
+      MYSQL_PASSWORD: olga_password
+    ports:
+      - "3306:3306"
+    volumes:
+      - olga-mysql-data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-prootpassword"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    networks:
+      - pixtral-network
+
+  olga-api:
+    image: kirito140/olga-backend:latest
+    container_name: PathoCollab-olga-api
+    restart: unless-stopped
+    environment:
+      ADDRESS: 0.0.0.0
+      PORT: 9091
+      MYSQL_URL: jdbc:mysql://olga-mysql:3306/olga
+      MYSQL_USERNAME: olga_user
+      MYSQL_PASSWORD: olga_password
+      FIREBASE_KEY_PATH: /app/config/apiKey.json
+    depends_on:
+      olga-mysql:
+        condition: service_healthy
+    ports:
+      - "9091:9091"
+    volumes:
+      - ../apps/olga-service/config/apiKey.json:/app/config/apiKey.json:ro
+    networks:
+      - pixtral-network
+
+  olga-designer:
+    build:
+      context: ../apps/olga-service
+      dockerfile: Dockerfile.designer
+    container_name: PathoCollab-olga-designer
+    restart: unless-stopped
+    depends_on:
+      - olga-api
+    ports:
+      - "8080:80"
+    volumes:
+      - ../apps/olga-service/config/config.json:/usr/share/nginx/html/config/config.json:ro
+    networks:
+      - pixtral-network
+
+  olga-admin:
+    build:
+      context: ../apps/olga-service
+      dockerfile: Dockerfile.admin
+    container_name: PathoCollab-olga-admin
+    restart: unless-stopped
+    depends_on:
+      - olga-api
+    ports:
+      - "8081:80"
+    volumes:
+      - ../apps/olga-service/config/config.json:/usr/share/nginx/html/config/config.json:ro
+    networks:
+      - pixtral-network
+
 volumes:
   postgres-data:
   redis-data:
   minio-data:
   qdrant-data:
+  olga-mysql-data:
 
 networks:
   pixtral-network:
