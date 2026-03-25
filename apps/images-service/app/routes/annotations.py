@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
-from app.models.annotation import Annotation, AnnotationCreate, AnnotationDB
+from app.models.annotation import Annotation, AnnotationCreate, AnnotationDB, AnnotationType
 from typing import List
 import json
 from datetime import datetime, timezone
@@ -84,6 +84,28 @@ def _extract_current_user(current_user):
     return str(user_id), str(owner_name) if owner_name else None
 
 
+async def _get_annotation_or_404(db: AsyncSession, annotation_id: str) -> AnnotationDB:
+    result = await db.execute(
+        select(AnnotationDB).where(AnnotationDB.id == annotation_id)
+    )
+    annotation = result.scalar_one_or_none()
+
+    if not annotation:
+        raise HTTPException(status_code=404, detail="Annotation not found")
+
+    return annotation
+
+
+def _check_annotation_owner(annotation: AnnotationDB, current_user):
+    user_id, _ = _extract_current_user(current_user)
+
+    if str(annotation.user_id) != str(user_id):
+        raise HTTPException(
+            status_code=403,
+            detail="You are not allowed to modify this annotation",
+        )
+
+
 @router.post("/", response_model=Annotation, status_code=status.HTTP_201_CREATED)
 async def create_annotation(
     annotation_data: AnnotationCreate,
@@ -97,7 +119,7 @@ async def create_annotation(
         case_id=annotation_data.case_id,
         user_id=user_id,
         owner_name=owner_name,
-        type=annotation_data.type,
+        type=AnnotationType.MANUAL.value,
         label=annotation_data.label,
         severity=annotation_data.severity,
         category=annotation_data.category,
@@ -122,7 +144,10 @@ async def create_annotation(
 
 
 @router.get("/image/{image_id}", response_model=List[Annotation])
-async def get_image_annotations(image_id: str, db: AsyncSession = Depends(get_db_override)):
+async def get_image_annotations(
+    image_id: str,
+    db: AsyncSession = Depends(get_db_override),
+):
     result = await db.execute(
         select(AnnotationDB)
         .where(AnnotationDB.image_id == image_id)
@@ -130,3 +155,62 @@ async def get_image_annotations(image_id: str, db: AsyncSession = Depends(get_db
     )
     annotations = result.scalars().all()
     return [_serialize_annotation(ann) for ann in annotations]
+
+
+@router.get("/{annotation_id}", response_model=Annotation)
+async def get_annotation(
+    annotation_id: str,
+    db: AsyncSession = Depends(get_db_override),
+):
+    annotation = await _get_annotation_or_404(db, annotation_id)
+    return _serialize_annotation(annotation)
+
+
+@router.put("/{annotation_id}", response_model=Annotation)
+async def update_annotation(
+    annotation_id: str,
+    annotation_data: AnnotationCreate,
+    db: AsyncSession = Depends(get_db_override),
+    current_user=Depends(get_current_user_override),
+):
+    db_annotation = await _get_annotation_or_404(db, annotation_id)
+    _check_annotation_owner(db_annotation, current_user)
+
+    db_annotation.image_id = annotation_data.image_id
+    db_annotation.case_id = annotation_data.case_id
+    db_annotation.type = AnnotationType.MANUAL.value
+    db_annotation.label = annotation_data.label
+    db_annotation.severity = annotation_data.severity
+    db_annotation.category = annotation_data.category
+    db_annotation.description = annotation_data.description
+    db_annotation.recommendation = annotation_data.recommendation
+    db_annotation.tags = json.dumps(annotation_data.tags or [])
+    db_annotation.stroke_color = annotation_data.stroke_color
+    db_annotation.fill_color = annotation_data.fill_color
+    db_annotation.stroke_width = (
+        str(annotation_data.stroke_width)
+        if annotation_data.stroke_width is not None
+        else None
+    )
+    db_annotation.confidence = annotation_data.confidence
+    db_annotation.notes = annotation_data.notes
+    db_annotation.coordinates = json.dumps(annotation_data.coordinates)
+    db_annotation.updated_at = datetime.now(timezone.utc)
+
+    await db.commit()
+    await db.refresh(db_annotation)
+
+    return _serialize_annotation(db_annotation)
+
+
+@router.delete("/{annotation_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_annotation(
+    annotation_id: str,
+    db: AsyncSession = Depends(get_db_override),
+    current_user=Depends(get_current_user_override),
+):
+    db_annotation = await _get_annotation_or_404(db, annotation_id)
+    _check_annotation_owner(db_annotation, current_user)
+
+    await db.delete(db_annotation)
+    await db.commit()

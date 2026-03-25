@@ -5,7 +5,7 @@ from typing import Optional
 from datetime import datetime, timezone
 import uuid
 
-Base = declarative_base()
+from .base import Base
 
 class ImageDB(Base):
     __tablename__ = "images"

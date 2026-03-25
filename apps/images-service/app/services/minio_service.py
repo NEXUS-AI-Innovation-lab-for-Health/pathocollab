@@ -13,7 +13,7 @@ class MinioService:
         self.endpoint = os.getenv("MINIO_ENDPOINT", "localhost:9000")
         self.access_key = os.getenv("MINIO_ACCESS_KEY", "minioadmin")
         self.secret_key = os.getenv("MINIO_SECRET_KEY", "minioadmin")
-        self.bucket_name = os.getenv("MINIO_BUCKET_NAME", "pixtral-wsi-images")
+        self.bucket_name = os.getenv("MINIO_BUCKET_NAME") or os.getenv("MINIO_BUCKET_WSI") or "pixtral-wsi-images"
         self.secure = os.getenv("MINIO_SECURE", "false").lower() == "true"
 
         self.client = Minio(

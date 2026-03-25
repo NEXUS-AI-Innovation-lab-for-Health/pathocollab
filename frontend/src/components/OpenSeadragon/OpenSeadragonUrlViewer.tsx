@@ -68,13 +68,14 @@ type ApiAnnotationRow = {
   id: string;
   image_id: string;
   case_id: string;
-  type: AnnotationType;
+  type: AnnotationType | string;
   label?: string | null;
   severity?: Severity | null;
   category?: AnnotationCategory | null;
   description?: string | null;
   recommendation?: string | null;
   tags?: string[] | null;
+  user_id?: string | null;
   owner_id?: string | null;
   owner_name?: string | null;
   created_at?: string | null;
@@ -114,33 +115,6 @@ type OlgaFormResponse = {
   form?: OlgaField[];
 };
 
-function inferShapeTypeFromCoordinates(
-  coords: Record<string, any> | null | undefined,
-): AnnotationType {
-  if (!coords || typeof coords !== "object") return "rect";
-
-  if (Array.isArray(coords.points)) return "polygon";
-  if (
-    typeof coords.cx === "number" &&
-    typeof coords.cy === "number" &&
-    typeof coords.rx === "number" &&
-    typeof coords.ry === "number"
-  ) {
-    return "circle";
-  }
-  if (
-    typeof coords.x === "number" &&
-    typeof coords.y === "number" &&
-    typeof coords.w === "number" &&
-    typeof coords.h === "number"
-  ) {
-    return "rect";
-  }
-
-  if (coords.shape_type === "polygon") return "polygon";
-  if (coords.shape_type === "circle") return "circle";
-  return "rect";
-}
 
 export default function OpenSeadragonUrlViewer(
   props: OpenSeadragonUrlViewerProps,
@@ -452,7 +426,7 @@ export default function OpenSeadragonUrlViewer(
       description: a.description ?? null,
       recommendation: a.recommendation ?? null,
       tags: Array.isArray(a.tags) ? a.tags : [],
-      ownerId: a.owner_id ?? null,
+      ownerId: (a as any).owner_id ?? (a as any).user_id ?? null,
       ownerName: a.owner_name ?? null,
       strokeColor: (a as any).stroke_color ?? "#ff3b30",
       fillColor: (a as any).fill_color ?? "rgba(255,59,48,0.08)",
@@ -514,18 +488,19 @@ export default function OpenSeadragonUrlViewer(
         const apiAnnotations = await fetchAnnotationsForImage(imageId);
         if (cancelled) return;
 
-        const mapped: Annotation[] = apiAnnotations.map(mapApiAnnotationToFrontend).filter(Boolean) as Annotation[];
+        const mapped: Annotation[] = apiAnnotations
+          .map(mapApiAnnotationToFrontend)
+          .filter(Boolean) as Annotation[];
 
         setAnnotations(mapped);
         saveAnnotations(imageKey, mapped);
-      } catch {
-        const raw = loadAnnotations(imageKey) as any[];
-        const local = (Array.isArray(raw) ? raw : []).map((a) => ({
-          ...a,
-          _source: normalizeSource(a?._source),
-        })) as Annotation[];
+      } catch (e) {
+        console.error("Erreur chargement annotations API:", e);
 
-        if (!cancelled) setAnnotations(local);
+        if (!cancelled) {
+          setAnnotations([]);
+          saveAnnotations(imageKey, []);
+        }
       }
     }
 
@@ -838,6 +813,10 @@ export default function OpenSeadragonUrlViewer(
     );
   }
 
+  function makeTempAnnotationId() {
+    return `tmp-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
+  }
+
   function authHeaders(): HeadersInit {
     const token = getToken();
     return token ? { Authorization: `Bearer ${token}` } : {};
@@ -853,7 +832,7 @@ export default function OpenSeadragonUrlViewer(
     const payload = {
       image_id: imgId,
       case_id: cId,
-      type: "manual",
+      type: ann.type,
       label: ann.label ?? "",
       severity: ann.severity ?? "Moyenne",
       category: ann.category ?? null,
@@ -879,7 +858,7 @@ export default function OpenSeadragonUrlViewer(
 
     if (!res.ok) {
       const text = await res.text().catch(() => "");
-      console.error("POST /api/annotations error:", res.status, text);
+      console.error("POST /api/annotations error:", res.status, text, payload);
       throw new Error(`POST annotation failed: ${res.status} - ${text}`);
     }
 
@@ -921,12 +900,13 @@ export default function OpenSeadragonUrlViewer(
     if (!pendingAnn || !imageKey) return;
 
     const currentUser = getCurrentUser();
-
     const extracted = extractAnnotationPayloadFromForm(formValues);
+    const tempId = pendingAnn.id || makeTempAnnotationId();
 
-    const nextAnn: Annotation = {
+    const localAnn: Annotation = {
       ...pendingAnn,
-      _source: normalizeSource((pendingAnn as any)?._source),
+      id: tempId,
+      _source: "local",
       label: extracted.label,
       severity: extracted.severity,
       category: extracted.category,
@@ -943,62 +923,71 @@ export default function OpenSeadragonUrlViewer(
       updatedAt: new Date().toISOString(),
     };
 
+    // affichage immédiat optimiste
     setAnnotations((prev) => {
-      const next = [...prev, nextAnn];
+      const next = [...prev, localAnn];
       saveAnnotations(imageKey, next);
       return next;
     });
 
     setPendingAnn(null);
     setDraftAnnotations([]);
-    setSelectedAnnotation(nextAnn);
+    setSelectedAnnotation(localAnn);
     setFormMode("view");
     setDetailOpen(false);
     resetFormFields();
 
-    try {
-      if (!imageId || !caseId) {
-        return;
-      }
+    // si pas d'identifiants backend, on garde seulement le local
+    if (!imageId || !caseId) {
+      return;
+    }
 
+    try {
       const saved = await postAnnotationToApi({
         imageId,
         caseId,
-        ann: nextAnn,
+        ann: localAnn,
       });
 
       const savedAnn: Annotation = {
-        ...nextAnn,
-        id: saved.id as string,
+        ...localAnn,
+        id: saved.id || localAnn.id,
         _source: "api",
-        ownerId: saved.user_id ?? nextAnn.ownerId,
-        ownerName: saved.owner_name ?? nextAnn.ownerName,
-        createdAt: saved.created_at ?? nextAnn.createdAt,
-        updatedAt: saved.updated_at ?? nextAnn.updatedAt,
-        severity: saved.severity ?? nextAnn.severity,
-        category: saved.category ?? nextAnn.category,
-        description: saved.description ?? nextAnn.description,
-        recommendation: saved.recommendation ?? nextAnn.recommendation,
-        tags: Array.isArray(saved.tags) ? saved.tags : nextAnn.tags,
-        strokeColor: saved.stroke_color ?? nextAnn.strokeColor,
-        fillColor: saved.fill_color ?? nextAnn.fillColor,
+        ownerId: saved.owner_id ?? saved.user_id ?? localAnn.ownerId,
+        ownerName: saved.owner_name ?? localAnn.ownerName,
+        createdAt: saved.created_at ?? saved.createdAt ?? localAnn.createdAt,
+        updatedAt: saved.updated_at ?? saved.updatedAt ?? localAnn.updatedAt,
+        severity: saved.severity ?? localAnn.severity,
+        category: saved.category ?? localAnn.category,
+        description: saved.description ?? localAnn.description,
+        recommendation: saved.recommendation ?? localAnn.recommendation,
+        tags: Array.isArray(saved.tags) ? saved.tags : localAnn.tags,
+        strokeColor: saved.stroke_color ?? localAnn.strokeColor,
+        fillColor: saved.fill_color ?? localAnn.fillColor,
         strokeWidth:
           typeof saved.stroke_width === "number"
             ? saved.stroke_width
-            : nextAnn.strokeWidth,
+            : Number(saved.stroke_width ?? localAnn.strokeWidth ?? 2),
       };
 
       setAnnotations((prev) => {
-        const replaced = prev.map((a) =>
-          a.id === nextAnn.id ? savedAnn : a,
-        );
-        saveAnnotations(imageKey, replaced);
-        return replaced;
+        const next = prev.map((a) => (a.id === tempId ? savedAnn : a));
+        saveAnnotations(imageKey, next);
+        return next;
       });
 
       setSelectedAnnotation(savedAnn);
     } catch (e) {
-      console.error(e);
+      console.error("Erreur sauvegarde annotation API:", e);
+
+      setAnnotations((prev) => {
+        const next = prev.filter((a) => a.id !== tempId);
+        saveAnnotations(imageKey, next);
+        return next;
+      });
+
+      setSelectedAnnotation(null);
+      alert("La sauvegarde de l’annotation a échoué. Vérifie le backend /api/annotations et la console réseau.");
     }
   };
 
@@ -1454,9 +1443,7 @@ export default function OpenSeadragonUrlViewer(
 
                     if (!selectedAnnotation || !imageKey) return;
 
-                    const extracted = extractAnnotationPayloadFromForm(
-                      formValues,
-                    );
+                    const extracted = extractAnnotationPayloadFromForm(formValues);
 
                     const updated: Annotation = {
                       ...selectedAnnotation,
@@ -1480,6 +1467,10 @@ export default function OpenSeadragonUrlViewer(
                     setSelectedAnnotation(updated);
                     setFormMode("view");
                     setDetailOpen(true);
+
+                    console.warn(
+                      "Edition locale uniquement: aucun endpoint backend PUT /annotations/{id} n'est appelé."
+                    );
                   }}
                   style={modalStyles.primaryBtn}
                 >

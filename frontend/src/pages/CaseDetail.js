@@ -1,5 +1,5 @@
-import React, { useState, useEffect, useRef, useMemo } from "react";
-import { useParams, useNavigate, Link } from "react-router-dom";
+import React, { useState, useEffect, useRef, useMemo, useCallback } from "react";
+import { useParams, useNavigate } from "react-router-dom";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -7,28 +7,33 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   ArrowLeft,
   FileText,
-  Calendar,
   User,
-  Plus,
-  Edit,
-  Trash2,
   Image,
   Users,
   MessageSquare,
   Download,
+  Upload,
 } from "lucide-react";
 import { toast } from "sonner";
 import axios from "axios";
 import ReactMarkdown from "react-markdown";
 import jsPDF from "jspdf";
-import html2canvas from "html2canvas";
 
 import OpenSeadragonUrlViewer from "../components/OpenSeadragon/OpenSeadragonUrlViewer.tsx";
+import OrthancSeriesViewer from "../components/Orthanc/OrthancSeriesViewer.tsx";
 
-const CASES_API = process.env.REACT_APP_BACKEND_URL || `${window.location.protocol}//${window.location.hostname}:8002`;
-const WORKFLOW_API = process.env.REACT_APP_WORKFLOW_URL || `${window.location.protocol}//${window.location.hostname}:8003`;
-const IMAGES_API = process.env.REACT_APP_IMAGES_URL || `${window.location.protocol}//${window.location.hostname}:8004`;
-const REPORTS_API = process.env.REACT_APP_REPORTS_URL || `${window.location.protocol}//${window.location.hostname}:8005`;
+const CASES_API =
+  process.env.REACT_APP_BACKEND_URL ||
+  `${window.location.protocol}//${window.location.hostname}:8002`;
+const WORKFLOW_API =
+  process.env.REACT_APP_WORKFLOW_URL ||
+  `${window.location.protocol}//${window.location.hostname}:8003`;
+const IMAGES_API =
+  process.env.REACT_APP_IMAGES_URL ||
+  `${window.location.protocol}//${window.location.hostname}:8004`;
+const REPORTS_API =
+  process.env.REACT_APP_REPORTS_URL ||
+  `${window.location.protocol}//${window.location.hostname}:8005`;
 
 const getStatusLabel = (status) => {
   const labels = {
@@ -53,6 +58,7 @@ const getStatusColor = (status) => {
 const CaseDetail = () => {
   const { caseId } = useParams();
   const navigate = useNavigate();
+
   const [caseData, setCase] = useState(null);
   const [patient, setPatient] = useState(null);
   const [workflow, setWorkflow] = useState(null);
@@ -62,92 +68,80 @@ const CaseDetail = () => {
   const [generatingPDF, setGeneratingPDF] = useState(false);
   const reportRefs = useRef({});
 
+  const [imageMode, setImageMode] = useState("pathology");
+
+  const [radiologySeries, setRadiologySeries] = useState([]);
+  const [selectedRadiologySeries, setSelectedRadiologySeries] = useState(null);
+  const [radiologyLoading, setRadiologyLoading] = useState(false);
+  const [radiologyError, setRadiologyError] = useState(null);
+
+  const [radiologyUploadFiles, setRadiologyUploadFiles] = useState([]);
+  const [radiologyUploading, setRadiologyUploading] = useState(false);
+
   const [wsis, setWsis] = useState([]);
   const [selectedWsi, setSelectedWsi] = useState(null);
   const [wsiLoading, setWsiLoading] = useState(false);
   const [wsiError, setWsiError] = useState(null);
 
-  useEffect(() => {
-    fetchCaseDetails();
-    fetchReports();
-  }, [caseId]);
+  const getAuthHeaders = useCallback(() => {
+    const token = localStorage.getItem("access_token");
+    return token ? { Authorization: `Bearer ${token}` } : {};
+  }, []);
 
-  useEffect(() => {
-    if (!patient?.id) return;
+  const getCurrentUserId = useCallback(() => {
+    const token = localStorage.getItem("access_token");
+    let currentUserId = "admin";
 
-    let cancelled = false;
-
-    (async () => {
+    if (token) {
       try {
-        setWsiLoading(true);
-        setWsiError(null);
-        setWsis([]);
-        setSelectedWsi(null);
+        const tokenData = JSON.parse(atob(token.split(".")[1]));
+        const email = tokenData.sub || tokenData.email || "";
 
-        const token = localStorage.getItem("access_token");
-        const res = await axios.get(
-          `${IMAGES_API}/api/debug/wsi-dzi?patient_id=${encodeURIComponent(patient.id)}`,
-          token ? { headers: { Authorization: `Bearer ${token}` } } : undefined,
-        );
-
-        const list = res.data?.wsis || res.data?.slides || [];
-        if (cancelled) return;
-
-        setWsis(list);
-        if (list.length > 0) setSelectedWsi(list[0]);
-      } catch (e) {
-        if (!cancelled) {
-          console.error("Error loading WSI/DZI:", e);
-          setWsiError(e);
-          setWsis([]);
-          setSelectedWsi(null);
+        if (email === "dr.smith@pixtral.fr") {
+          currentUserId = "dr.smith@pixtral.fr";
+        } else if (email === "admin@pixtral.fr") {
+          currentUserId = "admin@pixtral.fr";
+        } else {
+          currentUserId = email || "admin";
         }
-      } finally {
-        if (!cancelled) setWsiLoading(false);
+      } catch (error) {
+        console.error("Erreur de décodage du token:", error);
       }
-    })();
+    }
 
-    return () => {
-      cancelled = true;
-    };
-  }, [patient?.id]);
+    return currentUserId;
+  }, []);
 
-  const viewerSource = useMemo(() => {
-    if (!patient?.id || !selectedWsi?.wsi_id) return null;
+  const isAdmin = useCallback(() => {
+    const currentUserId = getCurrentUserId();
+    return currentUserId === "admin" || currentUserId === "admin@pixtral.fr";
+  }, [getCurrentUserId]);
 
-    return {
-      type: "dzi",
-      url: `${IMAGES_API}/api/wsi/patients/${encodeURIComponent(patient.id)}/${encodeURIComponent(selectedWsi.wsi_id)}/dzi`,
-      key: `${patient.id}:${selectedWsi.wsi_id}`,
-    };
-  }, [patient?.id, selectedWsi?.wsi_id]);
-
-  const fetchCaseDetails = async () => {
+  const fetchCaseDetails = useCallback(async () => {
     try {
-      // Fetch case
-      const caseResponse = await axios.get(
-        `${CASES_API}/api/cases/${caseId}`,
-      );
+      setLoading(true);
+
+      const caseResponse = await axios.get(`${CASES_API}/api/cases/${caseId}`);
       setCase(caseResponse.data);
 
-      // Fetch patient depuis la base de données
       try {
         const patientResponse = await axios.get(
-          `${CASES_API}/api/patients/${caseResponse.data.patient_id}`,
+          `${CASES_API}/api/patients/${caseResponse.data.patient_id}`
         );
         setPatient(patientResponse.data);
       } catch (err) {
         console.log("No patient found for this case");
+        setPatient(null);
       }
 
-      // Fetch workflow
       try {
         const workflowResponse = await axios.get(
-          `${WORKFLOW_API}/api/workflows/case/${caseId}`,
+          `${WORKFLOW_API}/api/workflows/case/${caseId}`
         );
         setWorkflow(workflowResponse.data);
       } catch (err) {
         console.log("No workflow found for this case");
+        setWorkflow(null);
       }
     } catch (error) {
       console.error("Error fetching case details:", error);
@@ -155,27 +149,153 @@ const CaseDetail = () => {
     } finally {
       setLoading(false);
     }
-  };
+  }, [caseId]);
 
-  const fetchReports = async () => {
+  const fetchReports = useCallback(async () => {
     try {
-      const response = await axios.get(
-        `${REPORTS_API}/api/reports/case/${caseId}`,
-        {
-          headers: {
-            Authorization: `Bearer ${localStorage.getItem("access_token")}`,
-          },
-        },
-      );
+      setLoadingReports(true);
+
+      const response = await axios.get(`${REPORTS_API}/api/reports/case/${caseId}`, {
+        headers: getAuthHeaders(),
+      });
+
       setReports(response.data);
-      console.log("Rapports chargés:", response.data);
     } catch (error) {
       console.error("Error fetching reports:", error);
-      // Ne pas afficher d'erreur si aucun rapport n'existe
       setReports([]);
     } finally {
       setLoadingReports(false);
     }
+  }, [caseId, getAuthHeaders]);
+
+  const fetchRadiologySeries = useCallback(
+    async (patientId) => {
+      if (!patientId) return;
+
+      try {
+        setRadiologyLoading(true);
+        setRadiologyError(null);
+        setRadiologySeries([]);
+        setSelectedRadiologySeries(null);
+
+        const res = await axios.get(
+          `${IMAGES_API}/api/radiology/patients/${encodeURIComponent(patientId)}/series`,
+          { headers: getAuthHeaders() }
+        );
+
+        const list = res.data || [];
+        setRadiologySeries(list);
+        setSelectedRadiologySeries(list.length > 0 ? list[0] : null);
+      } catch (error) {
+        console.error("Error loading radiology series:", error);
+        setRadiologyError(error);
+        setRadiologySeries([]);
+        setSelectedRadiologySeries(null);
+      } finally {
+        setRadiologyLoading(false);
+      }
+    },
+    [getAuthHeaders]
+  );
+
+  const fetchWsis = useCallback(
+    async (patientId) => {
+      if (!patientId) return;
+
+      try {
+        setWsiLoading(true);
+        setWsiError(null);
+        setWsis([]);
+        setSelectedWsi(null);
+
+        const res = await axios.get(
+          `${IMAGES_API}/api/debug/wsi-dzi?patient_id=${encodeURIComponent(patientId)}`,
+          { headers: getAuthHeaders() }
+        );
+
+        const list = res.data?.wsis || res.data?.slides || [];
+        setWsis(list);
+        setSelectedWsi(list.length > 0 ? list[0] : null);
+      } catch (e) {
+        console.error("Error loading WSI/DZI:", e);
+        setWsiError(e);
+        setWsis([]);
+        setSelectedWsi(null);
+      } finally {
+        setWsiLoading(false);
+      }
+    },
+    [getAuthHeaders]
+  );
+
+  useEffect(() => {
+    fetchCaseDetails();
+    fetchReports();
+  }, [fetchCaseDetails, fetchReports]);
+
+  useEffect(() => {
+    if (!patient?.id) return;
+    fetchWsis(patient.id);
+    fetchRadiologySeries(patient.id);
+  }, [patient?.id, fetchWsis, fetchRadiologySeries]);
+
+  const viewerSource = useMemo(() => {
+    if (!patient?.id || !selectedWsi?.wsi_id) return null;
+
+    return {
+      type: "dzi",
+      url: `${IMAGES_API}/api/wsi/patients/${encodeURIComponent(
+        patient.id
+      )}/${encodeURIComponent(selectedWsi.wsi_id)}/dzi`,
+      key: `${patient.id}:${selectedWsi.wsi_id}`,
+    };
+  }, [patient?.id, selectedWsi?.wsi_id]);
+
+  const canCreateReport = () => {
+    if (!workflow || !workflow.specialists_order) return false;
+
+    const currentUserId = getCurrentUserId();
+    if (isAdmin()) return false;
+
+    const isSpecialist = workflow.specialists_order.includes(currentUserId);
+    const isCurrentSpecialist =
+      workflow.specialists_order[workflow.current_step] === currentUserId;
+
+    return isSpecialist && isCurrentSpecialist;
+  };
+
+  const canEditReport = (reportUserId) => {
+    const currentUserId = getCurrentUserId();
+    if (isAdmin()) return false;
+    return currentUserId === reportUserId;
+  };
+
+  const canDeleteReport = (reportUserId) => {
+    const currentUserId = getCurrentUserId();
+    if (isAdmin()) return false;
+    return currentUserId === reportUserId;
+  };
+
+  const getCurrentSpecialist = () => {
+    if (!workflow || !workflow.specialists_order) return null;
+    return workflow.specialists_order[workflow.current_step];
+  };
+
+  const getSpecialistStep = (reportUserId) => {
+    if (!workflow || !workflow.specialists_order) return null;
+
+    const specialistIndex = workflow.specialists_order.findIndex(
+      (specialist) => specialist === reportUserId
+    );
+
+    if (specialistIndex === -1) return null;
+
+    return {
+      step: specialistIndex + 1,
+      totalSteps: workflow.specialists_order.length,
+      isCurrentStep: specialistIndex === workflow.current_step,
+      isCompleted: specialistIndex < workflow.current_step,
+    };
   };
 
   const handleDeleteReport = async (reportId, reportUserId) => {
@@ -190,13 +310,10 @@ const CaseDetail = () => {
 
     try {
       await axios.delete(`${REPORTS_API}/api/reports/${reportId}`, {
-        headers: {
-          Authorization: `Bearer ${localStorage.getItem("access_token")}`,
-        },
+        headers: getAuthHeaders(),
       });
 
       toast.success("Rapport supprimé avec succès");
-      // Recharger la liste des rapports
       fetchReports();
     } catch (error) {
       console.error("Error deleting report:", error);
@@ -208,215 +325,129 @@ const CaseDetail = () => {
     }
   };
 
-  const getSpecialistStep = (reportUserId, reportIndex) => {
-    if (!workflow || !workflow.specialists_order) return null;
-
-    const specialistIndex = workflow.specialists_order.findIndex(
-      (specialist) => specialist === reportUserId,
-    );
-
-    if (specialistIndex === -1) return null;
-
-    return {
-      step: specialistIndex + 1,
-      totalSteps: workflow.specialists_order.length,
-      isCurrentStep: specialistIndex === workflow.current_step,
-      isCompleted: specialistIndex < workflow.current_step,
-    };
+  const handleRadiologyFileChange = (e) => {
+    const files = Array.from(e.target.files || []);
+    setRadiologyUploadFiles(files);
   };
 
-  const getCurrentUserId = () => {
-    // Récupérer l'ID de l'utilisateur connecté depuis le token JWT
-    const token = localStorage.getItem("access_token");
-    let currentUserId = "admin"; // Valeur par défaut
+  const handleRadiologyUpload = async () => {
+    if (!patient?.id) {
+      toast.error("Patient introuvable");
+      return;
+    }
 
-    if (token) {
-      try {
-        // Décoder le token pour obtenir l'ID utilisateur
-        const tokenData = JSON.parse(atob(token.split(".")[1]));
-        // Utiliser l'email directement comme identifiant
-        const email = tokenData.sub || tokenData.email || "";
+    if (!radiologyUploadFiles.length) {
+      toast.error("Sélectionnez au moins un fichier DICOM");
+      return;
+    }
 
-        if (email === "dr.smith@pixtral.fr") {
-          currentUserId = "dr.smith@pixtral.fr";
-        } else if (email === "admin@pixtral.fr") {
-          currentUserId = "admin@pixtral.fr";
-        } else {
-          currentUserId = email || "admin";
+    try {
+      setRadiologyUploading(true);
+
+      const form = new FormData();
+      radiologyUploadFiles.forEach((f) => form.append("files", f));
+
+      const currentUserId = getCurrentUserId();
+
+      await axios.post(
+        `${IMAGES_API}/api/radiology/upload?patient_id=${encodeURIComponent(
+          patient.id
+        )}&uploaded_by=${encodeURIComponent(currentUserId)}`,
+        form,
+        {
+          headers: {
+            "Content-Type": "multipart/form-data",
+            ...getAuthHeaders(),
+          },
         }
+      );
 
-        console.log("Token décodé:", tokenData);
-        console.log("Email détecté:", email);
-        console.log("User ID final:", currentUserId);
-      } catch (error) {
-        console.error("Erreur de décodage du token:", error);
-      }
+      toast.success("Images radiologiques importées avec succès");
+      setRadiologyUploadFiles([]);
+      await fetchRadiologySeries(patient.id);
+      setImageMode("radiology");
+    } catch (error) {
+      console.error("Error uploading radiology images:", error);
+      toast.error("Erreur lors de l'import des images radiologiques");
+    } finally {
+      setRadiologyUploading(false);
     }
-
-    return currentUserId;
-  };
-
-  const isAdmin = () => {
-    const currentUserId = getCurrentUserId();
-    return currentUserId === "admin" || currentUserId === "admin@pixtral.fr";
-  };
-
-  const canCreateReport = () => {
-    // Vérifier si l'utilisateur connecté est un spécialiste assigné à ce cas
-    if (!workflow || !workflow.specialists_order) return false;
-
-    const currentUserId = getCurrentUserId();
-
-    console.log("Workflow spécialistes:", workflow.specialists_order);
-    console.log("Étape actuelle:", workflow.current_step);
-    console.log("User ID:", currentUserId);
-
-    // L'admin ne peut pas créer de rapports
-    if (isAdmin()) return false;
-
-    // Vérifier si l'utilisateur est dans la liste des spécialistes
-    const isSpecialist = workflow.specialists_order.includes(currentUserId);
-    console.log("Est spécialiste:", isSpecialist);
-
-    // Vérifier si c'est le tour de cet utilisateur (spécialiste actuel)
-    const isCurrentSpecialist =
-      workflow.specialists_order[workflow.current_step] === currentUserId;
-    console.log("Est spécialiste actuel:", isCurrentSpecialist);
-
-    return isSpecialist && isCurrentSpecialist;
-  };
-
-  const canEditReport = (reportUserId) => {
-    const currentUserId = getCurrentUserId();
-
-    console.log(
-      "Vérification édition - User ID:",
-      currentUserId,
-      "Report User ID:",
-      reportUserId,
-    );
-
-    // L'admin ne peut pas modifier les rapports
-    if (isAdmin()) {
-      console.log("Admin ne peut pas modifier");
-      return false;
-    }
-
-    // Seul l'auteur du rapport peut le modifier
-    const canEdit = currentUserId === reportUserId;
-    console.log("Peut modifier:", canEdit);
-
-    return canEdit;
-  };
-
-  const canDeleteReport = (reportUserId) => {
-    const currentUserId = getCurrentUserId();
-
-    console.log(
-      "Vérification suppression - User ID:",
-      currentUserId,
-      "Report User ID:",
-      reportUserId,
-    );
-
-    // L'admin ne peut pas supprimer les rapports
-    if (isAdmin()) {
-      console.log("Admin ne peut pas supprimer");
-      return false;
-    }
-
-    // Seul l'auteur du rapport peut le supprimer
-    const canDelete = currentUserId === reportUserId;
-    console.log("Peut supprimer:", canDelete);
-
-    return canDelete;
-  };
-
-  const getCurrentSpecialist = () => {
-    if (!workflow || !workflow.specialists_order) return null;
-    return workflow.specialists_order[workflow.current_step];
   };
 
   const handleDownloadPDF = async (report) => {
-      setGeneratingPDF(true);
-      try {
-        const pdf = new jsPDF();
-        let yPos = 20;
-  
-        const ensurePage = (extra = 0) => {
-          if (yPos + extra > 270) {
-            pdf.addPage();
-            yPos = 20;
-          }
-        };
-  
-        // Add header information
-        pdf.setFontSize(18);
-        pdf.setFont("helvetica", "bold");
-        ensurePage(10);
-        pdf.text(`Rapport d'analyse - ${caseData.id}`, 20, yPos);
-        yPos += 10;
-  
-        pdf.setFontSize(12);
-        pdf.setFont("helvetica", "normal");
-        ensurePage(8);
-        pdf.text(
-          `Par ${report.user_id} • ${new Date(
-            report.created_at,
-          ).toLocaleDateString("fr-FR")}`,
-          20,
-          yPos,
-        );
-        yPos += 8;
-  
-        pdf.setFontSize(14);
-        pdf.setFont("helvetica", "bold");
-        ensurePage(12);
-        pdf.text(`Titre: ${report.title}`, 20, yPos);
-        yPos += 12;
-  
-        // Parse and add report content with proper formatting
-        pdf.setFontSize(12);
-        pdf.setFont("helvetica", "normal");
-  
-        const lines = report.content.split("\n");
-        for (const line of lines) {
-          if (line.trim()) {
-            // Check if it's a title (starts with **)
-            if (line.startsWith("**") && line.endsWith("**")) {
-              pdf.setFont("helvetica", "bold");
-              const title = line.replace(/\*\*/g, "");
-              ensurePage(8);
-              pdf.text(title, 20, yPos);
-              yPos += 8;
-            } else {
-              pdf.setFont("helvetica", "normal");
-              // Handle long lines by splitting them
-              const splitText = pdf.splitTextToSize(line, 170);
-              for (const textLine of splitText) {
-                ensurePage(6);
-                pdf.text(textLine, 20, yPos);
-                yPos += 6;
-              }
-            }
+    setGeneratingPDF(true);
+    try {
+      const pdf = new jsPDF();
+      let yPos = 20;
+
+      const ensurePage = (extra = 0) => {
+        if (yPos + extra > 270) {
+          pdf.addPage();
+          yPos = 20;
+        }
+      };
+
+      pdf.setFontSize(18);
+      pdf.setFont("helvetica", "bold");
+      ensurePage(10);
+      pdf.text(`Rapport d'analyse - ${caseData.id}`, 20, yPos);
+      yPos += 10;
+
+      pdf.setFontSize(12);
+      pdf.setFont("helvetica", "normal");
+      ensurePage(8);
+      pdf.text(
+        `Par ${report.user_id} • ${new Date(report.created_at).toLocaleDateString("fr-FR")}`,
+        20,
+        yPos
+      );
+      yPos += 8;
+
+      pdf.setFontSize(14);
+      pdf.setFont("helvetica", "bold");
+      ensurePage(12);
+      pdf.text(`Titre: ${report.title}`, 20, yPos);
+      yPos += 12;
+
+      pdf.setFontSize(12);
+      pdf.setFont("helvetica", "normal");
+
+      const lines = report.content.split("\n");
+      for (const line of lines) {
+        if (line.trim()) {
+          if (line.startsWith("**") && line.endsWith("**")) {
+            pdf.setFont("helvetica", "bold");
+            const title = line.replace(/\*\*/g, "");
+            ensurePage(8);
+            pdf.text(title, 20, yPos);
+            yPos += 8;
           } else {
-            ensurePage(4);
-            yPos += 4; // Add space for empty lines
+            pdf.setFont("helvetica", "normal");
+            const splitText = pdf.splitTextToSize(line, 170);
+            for (const textLine of splitText) {
+              ensurePage(6);
+              pdf.text(textLine, 20, yPos);
+              yPos += 6;
+            }
           }
-  }
-  
-        pdf.save(
-          `rapport_${report.title.replace(/[^a-z0-9]/gi, "_").toLowerCase()}.pdf`,
-        );
-  
-        toast.success("PDF téléchargé avec succès");
-      } catch (error) {
-        console.error("Error generating PDF:", error);
-        toast.error("Erreur lors de la génération du PDF");
-      } finally {
-        setGeneratingPDF(false);
+        } else {
+          ensurePage(4);
+          yPos += 4;
+        }
       }
-    };
+
+      pdf.save(
+        `rapport_${report.title.replace(/[^a-z0-9]/gi, "_").toLowerCase()}.pdf`
+      );
+
+      toast.success("PDF téléchargé avec succès");
+    } catch (error) {
+      console.error("Error generating PDF:", error);
+      toast.error("Erreur lors de la génération du PDF");
+    } finally {
+      setGeneratingPDF(false);
+    }
+  };
 
   if (loading) {
     return (
@@ -436,7 +467,6 @@ const CaseDetail = () => {
 
   return (
     <div className="min-h-screen bg-slate-50" data-testid="case-detail-page">
-      {/* Header */}
       <header className="bg-white border-b border-slate-200">
         <div className="max-w-7xl mx-auto px-6 py-4">
           <div className="flex items-center gap-4">
@@ -448,22 +478,24 @@ const CaseDetail = () => {
             >
               <ArrowLeft className="h-5 w-5" />
             </Button>
+
             <div className="flex-1">
               <div className="flex items-center gap-3">
-                <h1 className="text-2xl font-bold text-slate-900">
-                  {caseData.id}
-                </h1>
+                <h1 className="text-2xl font-bold text-slate-900">{caseData.id}</h1>
                 <Badge className={getStatusColor(caseData.status)}>
                   {getStatusLabel(caseData.status)}
                 </Badge>
               </div>
+
               <p className="text-sm text-slate-500 mt-1">{caseData.title}</p>
+
               {workflow && getCurrentSpecialist() && (
                 <p className="text-xs text-blue-600 mt-1">
                   En attente du rapport de Dr. {getCurrentSpecialist()}
                 </p>
               )}
             </div>
+
             {canCreateReport() && (
               <Button
                 data-testid="start-analysis-button"
@@ -501,9 +533,7 @@ const CaseDetail = () => {
             </TabsTrigger>
           </TabsList>
 
-          {/* Overview Tab */}
           <TabsContent value="overview" className="space-y-6">
-            {/* Case Information Card */}
             <Card>
               <CardHeader>
                 <CardTitle>Informations du cas</CardTitle>
@@ -511,9 +541,7 @@ const CaseDetail = () => {
               <CardContent>
                 <div className="grid grid-cols-2 gap-4">
                   <div>
-                    <p className="text-sm font-medium text-slate-500">
-                      ID du cas
-                    </p>
+                    <p className="text-sm font-medium text-slate-500">ID du cas</p>
                     <p className="text-base text-slate-900">{caseData.id}</p>
                   </div>
                   <div>
@@ -521,12 +549,8 @@ const CaseDetail = () => {
                     <p className="text-base text-slate-900">{caseData.title}</p>
                   </div>
                   <div>
-                    <p className="text-sm font-medium text-slate-500">
-                      ID Patient
-                    </p>
-                    <p className="text-base text-slate-900">
-                      {caseData.patient_id}
-                    </p>
+                    <p className="text-sm font-medium text-slate-500">ID Patient</p>
+                    <p className="text-base text-slate-900">{caseData.patient_id}</p>
                   </div>
                   {patient && (
                     <div>
@@ -534,9 +558,7 @@ const CaseDetail = () => {
                         Date de naissance
                       </p>
                       <p className="text-base text-slate-900">
-                        {new Date(patient.date_of_birth).toLocaleDateString(
-                          "fr-FR",
-                        )}
+                        {new Date(patient.date_of_birth).toLocaleDateString("fr-FR")}
                       </p>
                     </div>
                   )}
@@ -547,29 +569,21 @@ const CaseDetail = () => {
                     </Badge>
                   </div>
                   <div className="col-span-2">
-                    <p className="text-sm font-medium text-slate-500">
-                      Description
-                    </p>
+                    <p className="text-sm font-medium text-slate-500">Description</p>
                     <p className="text-base text-slate-900">
                       {caseData.description || "Aucune description"}
                     </p>
                   </div>
                   <div className="col-span-2">
-                    <p className="text-sm font-medium text-slate-500">
-                      Créé par
-                    </p>
-                    <p className="text-base text-slate-900">
-                      {caseData.created_by}
-                    </p>
+                    <p className="text-sm font-medium text-slate-500">Créé par</p>
+                    <p className="text-base text-slate-900">{caseData.created_by}</p>
                   </div>
                   <div className="col-span-2">
                     <p className="text-sm font-medium text-slate-500">
                       Date de création
                     </p>
                     <p className="text-base text-slate-900">
-                      {new Date(caseData.created_at).toLocaleDateString(
-                        "fr-FR",
-                      )}
+                      {new Date(caseData.created_at).toLocaleDateString("fr-FR")}
                     </p>
                   </div>
                 </div>
@@ -584,32 +598,20 @@ const CaseDetail = () => {
                 <CardContent>
                   <div className="grid grid-cols-2 gap-4">
                     <div>
-                      <p className="text-sm font-medium text-slate-500">
-                        Nom complet
-                      </p>
-                      <p className="text-base text-slate-900">
-                        {patient.full_name}
-                      </p>
+                      <p className="text-sm font-medium text-slate-500">Nom complet</p>
+                      <p className="text-base text-slate-900">{patient.full_name}</p>
                     </div>
                     <div>
-                      <p className="text-sm font-medium text-slate-500">
-                        ID Patient
-                      </p>
+                      <p className="text-sm font-medium text-slate-500">ID Patient</p>
                       <p className="text-base text-slate-900">{patient.id}</p>
                     </div>
                     <div>
                       <p className="text-sm font-medium text-slate-500">Âge</p>
-                      <p className="text-base text-slate-900">
-                        {patient.age} ans
-                      </p>
+                      <p className="text-base text-slate-900">{patient.age} ans</p>
                     </div>
                     <div>
-                      <p className="text-sm font-medium text-slate-500">
-                        Genre
-                      </p>
-                      <p className="text-base text-slate-900">
-                        {patient.gender}
-                      </p>
+                      <p className="text-sm font-medium text-slate-500">Genre</p>
+                      <p className="text-base text-slate-900">{patient.gender}</p>
                     </div>
                     {patient.medical_history && (
                       <div className="col-span-2">
@@ -626,150 +628,199 @@ const CaseDetail = () => {
                         <p className="text-sm font-medium text-slate-500">
                           Symptômes
                         </p>
-                        <p className="text-base text-slate-900">
-                          {patient.symptoms}
-                        </p>
+                        <p className="text-base text-slate-900">{patient.symptoms}</p>
                       </div>
                     )}
-                  </div>
-                </CardContent>
-              </Card>
-            )}
-
-            {workflow && (
-              <Card data-testid="workflow-card">
-                <CardHeader>
-                  <CardTitle>Workflow Collaboratif</CardTitle>
-                </CardHeader>
-                <CardContent>
-                  <div className="space-y-3">
-                    {workflow.specialists_order.map((specialist, index) => (
-                      <div
-                        key={index}
-                        className={`flex items-center gap-3 p-3 rounded-lg border ${
-                          index === workflow.current_step
-                            ? "border-blue-300 bg-blue-50"
-                            : index < workflow.current_step
-                              ? "border-green-300 bg-green-50"
-                              : "border-slate-200 bg-slate-50"
-                        }`}
-                        data-testid={`workflow-step-${index}`}
-                      >
-                        <div
-                          className={`w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold ${
-                            index === workflow.current_step
-                              ? "bg-blue-600 text-white"
-                              : index < workflow.current_step
-                                ? "bg-green-600 text-white"
-                                : "bg-slate-300 text-slate-600"
-                          }`}
-                        >
-                          {index + 1}
-                        </div>
-                        <div className="flex-1">
-                          <p className="font-medium text-slate-900">
-                            Spécialiste {specialist}
-                          </p>
-                          <p className="text-sm text-slate-500">
-                            {index === workflow.current_step
-                              ? "En cours d'analyse"
-                              : index < workflow.current_step
-                                ? "Terminé"
-                                : "En attente"}
-                          </p>
-                        </div>
-                      </div>
-                    ))}
                   </div>
                 </CardContent>
               </Card>
             )}
           </TabsContent>
 
-          {/* Images Tab */}
           <TabsContent value="images" className="space-y-6">
             <Card>
               <CardHeader>
-                <CardTitle>Images WSI (OpenSeadragon)</CardTitle>
+                <CardTitle>Imagerie du patient</CardTitle>
               </CardHeader>
 
               <CardContent className="space-y-4">
-                {/* Selector */}
-                <div className="flex flex-col md:flex-row md:items-center gap-3">
-                  <div className="flex items-center gap-2">
-                    <span className="text-sm text-slate-600">Patient :</span>
-                    <Badge variant="outline">
-                      {patient?.full_name || patient?.id}
-                    </Badge>
+                <div className="flex flex-col gap-3">
+                  <div className="flex flex-wrap items-center gap-3">
+                    <div className="flex items-center gap-2">
+                      <span className="text-sm text-slate-600">Patient :</span>
+                      <Badge variant="outline">{patient?.full_name || patient?.id}</Badge>
+                    </div>
+
+                    <div className="flex items-center gap-2">
+                      <Button
+                        variant={imageMode === "pathology" ? "default" : "outline"}
+                        onClick={() => setImageMode("pathology")}
+                      >
+                        Pathologie
+                      </Button>
+                      <Button
+                        variant={imageMode === "radiology" ? "default" : "outline"}
+                        onClick={() => setImageMode("radiology")}
+                      >
+                        Radiologie
+                      </Button>
+                    </div>
                   </div>
 
-                  <div className="flex-1" />
+                  {imageMode === "pathology" ? (
+                    <>
+                      <div className="flex flex-col md:flex-row md:items-center gap-3">
+                        <div className="flex-1" />
+                        <div className="flex items-center gap-2">
+                          <span className="text-sm text-slate-600">WSI :</span>
 
-                  <div className="flex items-center gap-2">
-                    <span className="text-sm text-slate-600">WSI :</span>
+                          <select
+                            className="border border-slate-200 rounded-md px-3 py-2 bg-white text-sm min-w-[260px]"
+                            disabled={wsiLoading || wsis.length === 0}
+                            value={selectedWsi?.wsi_id || ""}
+                            onChange={(e) => {
+                              const w = wsis.find((x) => x.wsi_id === e.target.value);
+                              setSelectedWsi(w || null);
+                            }}
+                          >
+                            {wsis.length === 0 ? (
+                              <option value="">Aucune WSI disponible</option>
+                            ) : (
+                              wsis.map((w) => (
+                                <option key={w.wsi_id} value={w.wsi_id}>
+                                  {w.filename || `WSI ${w.wsi_id}`}
+                                </option>
+                              ))
+                            )}
+                          </select>
 
-                    <select
-                      className="border border-slate-200 rounded-md px-3 py-2 bg-white text-sm min-w-[260px]"
-                      disabled={wsiLoading || wsis.length === 0}
-                      value={selectedWsi?.wsi_id || ""}
-                      onChange={(e) => {
-                        const w = wsis.find((x) => x.wsi_id === e.target.value);
-                        setSelectedWsi(w || null);
-                      }}
-                    >
-                      {wsis.length === 0 ? (
-                        <option value="">Aucune WSI disponible</option>
-                      ) : (
-                        wsis.map((w) => (
-                          <option key={w.wsi_id} value={w.wsi_id}>
-                            {w.filename || `WSI ${w.wsi_id}`}
-                          </option>
-                        ))
-                      )}
-                    </select>
-
-                    <span className="text-xs text-slate-500">
-                      {wsis.length} WSI
-                    </span>
-                  </div>
-                </div>
-
-                {/* States */}
-                {wsiLoading && (
-                  <div className="text-sm text-slate-600">
-                    Chargement des images…
-                  </div>
-                )}
-
-                {!wsiLoading && wsiError && (
-                  <div className="text-sm text-red-600">
-                    Impossible de charger les WSI pour ce patient.
-                  </div>
-                )}
-
-                {/* Viewer */}
-                <div className="border border-slate-200 rounded-lg overflow-hidden bg-white">
-                  <div className="h-[70vh] min-h-[520px]">
-                    {!viewerSource ? (
-                      <div className="h-full flex items-center justify-center text-slate-500">
-                        Sélectionnez une image WSI.
+                          <span className="text-xs text-slate-500">{wsis.length} WSI</span>
+                        </div>
                       </div>
-                    ) : (
-                      <OpenSeadragonUrlViewer
-                        sourceType={viewerSource.type}
-                        sourceUrl={viewerSource.url}
-                        imageKey={viewerSource.key}
-                        imageId={selectedWsi?.wsi_id}
-                        caseId={caseData?.id}
-                      />
-                    )}
-                  </div>
+
+                      {wsiLoading && (
+                        <div className="text-sm text-slate-600">
+                          Chargement des images…
+                        </div>
+                      )}
+
+                      {!wsiLoading && wsiError && (
+                        <div className="text-sm text-red-600">
+                          Impossible de charger les WSI pour ce patient.
+                        </div>
+                      )}
+
+                      <div className="border border-slate-200 rounded-lg overflow-hidden bg-white">
+                        <div className="h-[70vh] min-h-[520px]">
+                          {!viewerSource ? (
+                            <div className="h-full flex items-center justify-center text-slate-500">
+                              Sélectionnez une image WSI.
+                            </div>
+                          ) : (
+                            <OpenSeadragonUrlViewer
+                              key={viewerSource.key}
+                              sourceType={viewerSource.type}
+                              sourceUrl={viewerSource.url}
+                              imageKey={viewerSource.key}
+                              imageId={selectedWsi?.wsi_id}
+                              caseId={caseData?.id}
+                            />
+                          )}
+                        </div>
+                      </div>
+                    </>
+                  ) : (
+                    <>
+                      <div className="flex flex-col gap-4">
+                        <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-3">
+                          <div className="flex flex-col sm:flex-row sm:items-center gap-3">
+                            <input
+                              type="file"
+                              multiple
+                              accept=".dcm,application/dicom"
+                              onChange={handleRadiologyFileChange}
+                              className="block w-full text-sm text-slate-700 file:mr-4 file:py-2 file:px-4 file:rounded-md file:border-0 file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100"
+                            />
+
+                            <Button
+                              onClick={handleRadiologyUpload}
+                              disabled={radiologyUploading || !radiologyUploadFiles.length}
+                            >
+                              <Upload className="h-4 w-4 mr-2" />
+                              {radiologyUploading ? "Import..." : "Importer DICOM"}
+                            </Button>
+                          </div>
+
+                          <div className="text-sm text-slate-500">
+                            {radiologyUploadFiles.length > 0
+                              ? `${radiologyUploadFiles.length} fichier(s) sélectionné(s)`
+                              : "Aucun fichier sélectionné"}
+                          </div>
+                        </div>
+
+                        <div className="flex flex-col md:flex-row md:items-center gap-3">
+                          <div className="flex-1" />
+                          <div className="flex items-center gap-2">
+                            <span className="text-sm text-slate-600">Série :</span>
+
+                            <select
+                              className="border border-slate-200 rounded-md px-3 py-2 bg-white text-sm min-w-[320px]"
+                              disabled={radiologyLoading || radiologySeries.length === 0}
+                              value={selectedRadiologySeries?.orthanc_series_id || ""}
+                              onChange={(e) => {
+                                const s = radiologySeries.find(
+                                  (x) => x.orthanc_series_id === e.target.value
+                                );
+                                setSelectedRadiologySeries(s || null);
+                              }}
+                            >
+                              {radiologySeries.length === 0 ? (
+                                <option value="">Aucune série radiologique disponible</option>
+                              ) : (
+                                radiologySeries.map((s) => (
+                                  <option
+                                    key={s.orthanc_series_id}
+                                    value={s.orthanc_series_id}
+                                  >
+                                    {[s.modality, s.study_date, s.series_description]
+                                      .filter(Boolean)
+                                      .join(" · ") || s.orthanc_series_id}
+                                  </option>
+                                ))
+                              )}
+                            </select>
+
+                            <span className="text-xs text-slate-500">
+                              {radiologySeries.length} série(s)
+                            </span>
+                          </div>
+                        </div>
+                      </div>
+
+                      {radiologyLoading && (
+                        <div className="text-sm text-slate-600">
+                          Chargement des séries radiologiques…
+                        </div>
+                      )}
+
+                      {!radiologyLoading && radiologyError && (
+                        <div className="text-sm text-red-600">
+                          Impossible de charger les séries radiologiques pour ce patient.
+                        </div>
+                      )}
+
+                      <div className="border border-slate-200 rounded-lg overflow-hidden bg-white">
+                        <div className="h-[70vh] min-h-[520px]">
+                          <OrthancSeriesViewer series={selectedRadiologySeries} />
+                        </div>
+                      </div>
+                    </>
+                  )}
                 </div>
               </CardContent>
             </Card>
           </TabsContent>
 
-          {/* Reports Tab */}
           <TabsContent value="reports">
             <Card>
               <CardHeader>
@@ -787,19 +838,14 @@ const CaseDetail = () => {
                       Aucun rapport n'a encore été créé pour ce cas
                     </p>
                     {canCreateReport() ? (
-                      <Button
-                        onClick={() => navigate(`/cases/${caseId}/report`)}
-                      >
+                      <Button onClick={() => navigate(`/cases/${caseId}/report`)}>
                         <FileText className="h-4 w-4 mr-2" />
                         Créer mon rapport
                       </Button>
                     ) : (
                       <div className="text-sm text-slate-500">
                         {workflow && getCurrentSpecialist() ? (
-                          <p>
-                            En attente du rapport de Dr.{" "}
-                            {getCurrentSpecialist()}
-                          </p>
+                          <p>En attente du rapport de Dr. {getCurrentSpecialist()}</p>
                         ) : (
                           <p>Vous n'êtes pas assigné à ce cas</p>
                         )}
@@ -808,17 +854,11 @@ const CaseDetail = () => {
                   </div>
                 ) : (
                   <div className="space-y-4">
-                    {reports.map((report, index) => {
-                      const specialistStep = getSpecialistStep(
-                        report.user_id,
-                        index,
-                      );
+                    {reports.map((report) => {
+                      const specialistStep = getSpecialistStep(report.user_id);
 
                       return (
-                        <Card
-                          key={report.id}
-                          className="border border-slate-200"
-                        >
+                        <Card key={report.id} className="border border-slate-200">
                           <CardContent className="pt-6">
                             <div className="flex items-start justify-between mb-4">
                               <div className="flex-1">
@@ -842,11 +882,13 @@ const CaseDetail = () => {
                                       }`}
                                     />
                                   </div>
+
                                   <div className="flex-1">
                                     <div className="flex items-center gap-2">
                                       <h3 className="font-semibold text-slate-900">
                                         {report.title}
                                       </h3>
+
                                       {specialistStep && (
                                         <Badge
                                           variant="outline"
@@ -863,34 +905,22 @@ const CaseDetail = () => {
                                         </Badge>
                                       )}
                                     </div>
+
                                     <p className="text-sm font-medium text-slate-700">
                                       Dr. {report.user_id}
-                                      {specialistStep?.isCurrentStep && (
-                                        <span className="ml-2 text-xs text-blue-600 font-medium">
-                                          (En cours)
-                                        </span>
-                                      )}
-                                      {specialistStep?.isCompleted && (
-                                        <span className="ml-2 text-xs text-green-600 font-medium">
-                                          (Terminé)
-                                        </span>
-                                      )}
                                     </p>
                                   </div>
                                 </div>
+
                                 <p className="text-sm text-slate-500 ml-10">
-                                  {new Date(
-                                    report.created_at,
-                                  ).toLocaleDateString("fr-FR")}{" "}
-                                  à{" "}
-                                  {new Date(
-                                    report.created_at,
-                                  ).toLocaleTimeString("fr-FR", {
+                                  {new Date(report.created_at).toLocaleDateString("fr-FR")} à{" "}
+                                  {new Date(report.created_at).toLocaleTimeString("fr-FR", {
                                     hour: "2-digit",
                                     minute: "2-digit",
                                   })}
                                 </p>
                               </div>
+
                               <div className="flex items-center gap-2">
                                 <Badge
                                   className={
@@ -901,6 +931,7 @@ const CaseDetail = () => {
                                 >
                                   {report.is_final ? "Final" : "Brouillon"}
                                 </Badge>
+
                                 <Button
                                   size="sm"
                                   variant="outline"
@@ -911,28 +942,25 @@ const CaseDetail = () => {
                                   <Download className="h-4 w-4 mr-1" />
                                   {generatingPDF ? "Génération..." : "PDF"}
                                 </Button>
+
                                 {canEditReport(report.user_id) && (
                                   <Button
                                     size="sm"
                                     onClick={() =>
-                                      navigate(
-                                        `/cases/${caseId}/report/${report.id}`,
-                                      )
+                                      navigate(`/cases/${caseId}/report/${report.id}`)
                                     }
                                     className="bg-blue-600 hover:bg-blue-700 text-white"
                                   >
                                     ✏️ Modifier
                                   </Button>
                                 )}
+
                                 {canDeleteReport(report.user_id) && (
                                   <Button
                                     size="sm"
                                     variant="destructive"
                                     onClick={() =>
-                                      handleDeleteReport(
-                                        report.id,
-                                        report.user_id,
-                                      )
+                                      handleDeleteReport(report.id, report.user_id)
                                     }
                                     className="bg-red-600 hover:bg-red-700 text-white"
                                   >
@@ -941,6 +969,7 @@ const CaseDetail = () => {
                                 )}
                               </div>
                             </div>
+
                             <div
                               ref={(el) => (reportRefs.current[report.id] = el)}
                               className="prose prose-sm max-w-none"
@@ -970,22 +999,17 @@ const CaseDetail = () => {
                         </Card>
                       );
                     })}
+
                     <div className="mt-6 pt-4 border-t border-slate-200">
-                      {canCreateReport() && (
-                        <Button
-                          onClick={() => navigate(`/cases/${caseId}/report`)}
-                        >
+                      {canCreateReport() ? (
+                        <Button onClick={() => navigate(`/cases/${caseId}/report`)}>
                           <FileText className="h-4 w-4 mr-2" />
                           Ajouter mon rapport
                         </Button>
-                      )}
-                      {!canCreateReport() && (
+                      ) : (
                         <div className="text-sm text-slate-500 text-center">
                           {workflow && getCurrentSpecialist() ? (
-                            <p>
-                              En attente du rapport de Dr.{" "}
-                              {getCurrentSpecialist()}
-                            </p>
+                            <p>En attente du rapport de Dr. {getCurrentSpecialist()}</p>
                           ) : (
                             <p>Vous n'êtes pas assigné à ce cas</p>
                           )}
@@ -998,27 +1022,26 @@ const CaseDetail = () => {
             </Card>
           </TabsContent>
 
-          {/* Team Tab */}
           <TabsContent value="team">
             <Card>
               <CardContent className="pt-6">
                 <div className="space-y-3">
-                  {caseData.assigned_specialists?.map((specialist, index) => (
-                    <div
-                      key={index}
-                      className="flex items-center gap-3 p-3 border border-slate-200 rounded-lg"
-                    >
-                      <div className="w-10 h-10 rounded-full bg-gradient-to-br from-blue-600 to-cyan-600 flex items-center justify-center text-white font-bold">
-                        {specialist.substring(0, 2).toUpperCase()}
+                  {caseData.assigned_specialists?.length ? (
+                    caseData.assigned_specialists.map((specialist, index) => (
+                      <div
+                        key={index}
+                        className="flex items-center gap-3 p-3 border border-slate-200 rounded-lg"
+                      >
+                        <div className="w-10 h-10 rounded-full bg-gradient-to-br from-blue-600 to-cyan-600 flex items-center justify-center text-white font-bold">
+                          {specialist.substring(0, 2).toUpperCase()}
+                        </div>
+                        <div>
+                          <p className="font-medium text-slate-900">{specialist}</p>
+                          <p className="text-sm text-slate-500">Spécialiste</p>
+                        </div>
                       </div>
-                      <div>
-                        <p className="font-medium text-slate-900">
-                          {specialist}
-                        </p>
-                        <p className="text-sm text-slate-500">Spécialiste</p>
-                      </div>
-                    </div>
-                  )) || (
+                    ))
+                  ) : (
                     <p className="text-center text-slate-500">
                       Aucun spécialiste assigné
                     </p>
@@ -1028,7 +1051,6 @@ const CaseDetail = () => {
             </Card>
           </TabsContent>
 
-          {/* Discussion Tab */}
           <TabsContent value="discussion">
             <Card>
               <CardContent className="pt-6">

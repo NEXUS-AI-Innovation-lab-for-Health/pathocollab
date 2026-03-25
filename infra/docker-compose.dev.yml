@@ -68,6 +68,21 @@ services:
     networks:
       - pixtral-network
 
+  orthanc:
+    image: jodogne/orthanc
+    container_name: orthanc
+    ports:
+      - "8042:8042"
+      - "4242:4242"
+    environment:
+      ORTHANC__NAME: "Orthanc"
+      ORTHANC__AUTHENTICATION_ENABLED: "true"
+      ORTHANC__REGISTERED_USERS: |
+        { "orthanc": "orthanc" }
+    restart: unless-stopped
+    networks:
+      - pixtral-network
+
   qdrant:
     image: qdrant/qdrant:latest
     container_name: PathoCollab-qdrant
@@ -143,11 +158,16 @@ services:
       MINIO_ENDPOINT: minio:9000
       MINIO_ACCESS_KEY: minioadmin
       MINIO_SECRET_KEY: minioadmin
-      MINIO_BUCKET_IMAGES: PathoCollab-images
-      MINIO_BUCKET_WSI: PathoCollab-wsi-images
+      MINIO_BUCKET_NAME: pixtral-wsi-images
+      MINIO_BUCKET_IMAGES: pixtral-images
+      MINIO_BUCKET_WSI: pixtral-wsi-images
+      ORTHANC_URL: http://orthanc:8042
+      ORTHANC_USERNAME: orthanc
+      ORTHANC_PASSWORD: orthanc
     depends_on:
       - postgres
       - minio
+      - orthanc
     ports:
       - "8004:8004"
     networks:
