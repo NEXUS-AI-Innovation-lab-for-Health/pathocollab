@@ -177,15 +177,79 @@ const Dashboard = () => {
     };
   }, []);
 
+  const getCurrentUserFromToken = () => {
+    const token = localStorage.getItem("access_token");
+    if (!token) return null;
+
+    try {
+      const payload = JSON.parse(atob(token.split(".")[1]));
+      return {
+        email: (payload.sub || payload.email || "").toLowerCase(),
+        fullName: payload.full_name || payload.name || "",
+        role: payload.role || "",
+      };
+    } catch (e) {
+      console.error("Erreur décodage token:", e);
+      return null;
+    }
+  };
+
+  const isUserAssignedToCase = (caseItem, currentUser) => {
+    if (!currentUser) return false;
+
+    // L’admin peut tout voir
+    if (currentUser.role === "admin") return true;
+
+    const assigned = Array.isArray(caseItem.assigned_specialists)
+      ? caseItem.assigned_specialists
+      : [];
+
+    const userEmail = currentUser.email;
+    const userFullName = currentUser.fullName.toLowerCase();
+
+    return assigned.some((specialist) => {
+      if (!specialist) return false;
+
+      // Cas 1 : tableau de chaînes
+      if (typeof specialist === "string") {
+        const value = specialist.toLowerCase();
+        return value === userEmail || value === userFullName;
+      }
+
+      // Cas 2 : tableau d’objets
+      if (typeof specialist === "object") {
+        const specialistEmail = (specialist.email || specialist.mail || "").toLowerCase();
+        const specialistName = (
+          specialist.full_name ||
+          specialist.fullName ||
+          specialist.name ||
+          ""
+        ).toLowerCase();
+
+        return specialistEmail === userEmail || specialistName === userFullName;
+      }
+
+      return false;
+    });
+  };
+
   const fetchCases = async () => {
     try {
-      // Récupérer les cas depuis l'API Cases Service
+      const token = localStorage.getItem("access_token");
+
       const response = await axios.get(`${CASES_API}/api/cases/list`, {
         headers: {
-          Authorization: `Bearer ${localStorage.getItem("access_token")}`,
+          Authorization: `Bearer ${token}`,
         },
       });
-      setCases(response.data);
+
+      const currentUser = getCurrentUserFromToken();
+
+      const visibleCases = Array.isArray(response.data)
+        ? response.data.filter((caseItem) => isUserAssignedToCase(caseItem, currentUser))
+        : [];
+
+      setCases(visibleCases);
     } catch (error) {
       console.error("Error fetching cases:", error);
       toast.error("Erreur lors du chargement des cas");
@@ -605,7 +669,13 @@ const Dashboard = () => {
                           caseItem.assigned_specialists.length > 0 && (
                             <p className="text-xs text-slate-400 mt-1">
                               Spécialistes:{" "}
-                              {caseItem.assigned_specialists.join(", ")}
+                              {caseItem.assigned_specialists
+                                .map((s) =>
+                                  typeof s === "string"
+                                    ? s
+                                    : s.full_name || s.fullName || s.name || s.email || "Inconnu"
+                                )
+                                .join(", ")}
                             </p>
                           )}
                       </div>

@@ -121,12 +121,18 @@ const CaseDetail = () => {
     try {
       setLoading(true);
 
-      const caseResponse = await axios.get(`${CASES_API}/api/cases/${caseId}`);
+      const authHeaders = { headers: getAuthHeaders() };
+
+      const caseResponse = await axios.get(
+        `${CASES_API}/api/cases/${caseId}`,
+        authHeaders
+      );
       setCase(caseResponse.data);
 
       try {
         const patientResponse = await axios.get(
-          `${CASES_API}/api/patients/${caseResponse.data.patient_id}`
+          `${CASES_API}/api/patients/${caseResponse.data.patient_id}`,
+          authHeaders
         );
         setPatient(patientResponse.data);
       } catch (err) {
@@ -136,7 +142,8 @@ const CaseDetail = () => {
 
       try {
         const workflowResponse = await axios.get(
-          `${WORKFLOW_API}/api/workflows/case/${caseId}`
+          `${WORKFLOW_API}/api/workflows/case/${caseId}`,
+          authHeaders
         );
         setWorkflow(workflowResponse.data);
       } catch (err) {
@@ -145,11 +152,30 @@ const CaseDetail = () => {
       }
     } catch (error) {
       console.error("Error fetching case details:", error);
+
+      if (error.response?.status === 401) {
+        toast.error("Session expirée ou non authentifiée");
+        navigate("/login");
+        return;
+      }
+
+      if (error.response?.status === 403) {
+        toast.error("Vous n'êtes pas autorisé à accéder à ce cas");
+        navigate("/dashboard");
+        return;
+      }
+
+      if (error.response?.status === 404) {
+        toast.error("Cas introuvable");
+        navigate("/dashboard");
+        return;
+      }
+
       toast.error("Erreur lors du chargement du cas");
     } finally {
       setLoading(false);
     }
-  }, [caseId]);
+  }, [caseId, getAuthHeaders, navigate]);
 
   const fetchReports = useCallback(async () => {
     try {

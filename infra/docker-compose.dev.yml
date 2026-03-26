@@ -193,6 +193,15 @@ services:
     networks:
       - pixtral-network
 
+  instanseg-service:
+    build:
+      context: ../apps/instanseg-service
+      dockerfile: Dockerfile
+    container_name: PathoCollab-instanseg-service
+    ports:
+      - "8010:8010"
+    restart: unless-stopped
+
   backend-gateway:
     build:
       context: ../backend

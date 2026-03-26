@@ -84,7 +84,11 @@ function setSvgViewBoxToViewportBBox(
   svgEl.setAttribute("height", "100%");
 }
 
-function createPolygonOverlaySvg(): {
+function createPolygonOverlaySvg(style?: {
+  strokeColor?: string;
+  fillColor?: string;
+  strokeWidth?: number;
+}): {
   svgEl: SVGSVGElement;
   polyEl: SVGPolygonElement;
   previewEl: SVGPolylineElement;
@@ -92,23 +96,24 @@ function createPolygonOverlaySvg(): {
   const svgNS = "http://www.w3.org/2000/svg";
 
   const svg = document.createElementNS(svgNS, "svg");
-  svg.style.pointerEvents = "none"; // laisse passer les events à OSD
+  svg.style.pointerEvents = "none";
   svg.style.overflow = "visible";
 
   const poly = document.createElementNS(svgNS, "polygon");
-  // Trait constant en pixels (comme border: 2px sur rect/circle)
   poly.setAttribute("vector-effect", "non-scaling-stroke");
-  poly.setAttribute("stroke-width", "2");
+  poly.setAttribute("stroke-width", String(style?.strokeWidth ?? 2));
   poly.setAttribute("stroke-linejoin", "round");
   poly.setAttribute("stroke-linecap", "round");
-
+  poly.setAttribute("stroke", style?.strokeColor ?? "#ff3b30");
+  poly.setAttribute("fill", style?.fillColor ?? "rgba(255,59,48,0.18)");
 
   const preview = document.createElementNS(svgNS, "polyline");
   preview.setAttribute("vector-effect", "non-scaling-stroke");
-  preview.setAttribute("stroke-width", "2");
+  preview.setAttribute("stroke-width", String(style?.strokeWidth ?? 2));
   preview.setAttribute("stroke-linecap", "round");
-  // Dash en pixels (sinon il varie avec le viewBox)
   preview.setAttribute("stroke-dasharray", "6 6");
+  preview.setAttribute("stroke", style?.strokeColor ?? "#ff3b30");
+  preview.setAttribute("fill", "none");
 
   svg.appendChild(poly);
   svg.appendChild(preview);
@@ -171,11 +176,16 @@ function updateOverlay(
 export function polygonStartIfNeeded(
   viewer: OpenSeadragon.Viewer,
   dragRef: React.MutableRefObject<any>,
+  style?: {
+    strokeColor?: string;
+    fillColor?: string;
+    strokeWidth?: number;
+  }
 ): PolygonLiveState {
   const poly = ensurePolygonState(dragRef);
   if (poly.active) return poly;
 
-  const { svgEl, polyEl, previewEl } = createPolygonOverlaySvg();
+  const { svgEl, polyEl, previewEl } = createPolygonOverlaySvg(style);
   poly.active = true;
   poly.points = [];
   poly.svgEl = svgEl;
@@ -183,7 +193,6 @@ export function polygonStartIfNeeded(
   poly.previewEl = previewEl;
   poly._overlayAdded = false;
 
-  // init overlay (invisible until first point)
   return poly;
 }
 
@@ -191,8 +200,13 @@ export function polygonAddPoint(
   event: OpenSeadragon.OSDEvent<any>,
   viewer: OpenSeadragon.Viewer,
   dragRef: React.MutableRefObject<any>,
+  style?: {
+    strokeColor?: string;
+    fillColor?: string;
+    strokeWidth?: number;
+  }
 ): void {
-  const poly = polygonStartIfNeeded(viewer, dragRef);
+  const poly = polygonStartIfNeeded(viewer, dragRef, style);
 
   event.preventDefaultAction = true;
 

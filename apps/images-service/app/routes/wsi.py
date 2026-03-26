@@ -168,7 +168,16 @@ def get_dzi(patient_id: str, wsi_id: str):
     data = minio.get_object_bytes(obj)
     if data is None:
         raise HTTPException(status_code=404, detail=f"DZI not found: {obj}")
-    return Response(content=data, media_type="application/xml")
+
+    return Response(
+        content=data,
+        media_type="application/xml",
+        headers={
+            "Access-Control-Allow-Origin": "*",
+            "Access-Control-Allow-Methods": "GET, OPTIONS",
+            "Access-Control-Allow-Headers": "*",
+        },
+    )
 
 
 @router.get("/patients/{patient_id}/{wsi_id}/slide_files/{path:path}")
@@ -177,7 +186,16 @@ def get_tile(patient_id: str, wsi_id: str, path: str):
     data = minio.get_object_bytes(obj)
     if data is None:
         raise HTTPException(status_code=404, detail=f"Tile not found: {obj}")
-    return Response(content=data, media_type="image/jpeg")
+    
+    return Response(
+        content=data,
+        media_type="image/jpeg",
+        headers={
+            "Access-Control-Allow-Origin": "*",
+            "Access-Control-Allow-Methods": "GET, OPTIONS",
+            "Access-Control-Allow-Headers": "*",
+        },
+    )
 
 
 @router.get("/openseadragon-images/{file_name}")
@@ -205,4 +223,12 @@ def get_tile_alias(patient_id: str, wsi_id: str, path: str):
     data = minio.get_object_bytes(obj)
     if data is None:
         raise HTTPException(status_code=404, detail=f"Tile not found: {obj}")
-    return Response(content=data, media_type="image/jpeg")
+    return Response(
+        content=data,
+        media_type="image/jpeg",
+        headers={
+            "Access-Control-Allow-Origin": "*",
+            "Access-Control-Allow-Methods": "GET, OPTIONS",
+            "Access-Control-Allow-Headers": "*",
+        },
+    )

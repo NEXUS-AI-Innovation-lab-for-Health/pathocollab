@@ -14,6 +14,7 @@ export function drawOnPressRect(
   viewer: OpenSeadragon.Viewer,
   dragRef: React.MutableRefObject<DragState>,
   color = "#ff3b30",
+  fillColor = "rgba(255,59,48,0.08)"
 ): [HTMLElement, { x: number; y: number }] {
   event.preventDefaultAction = true;
 
@@ -26,7 +27,7 @@ export function drawOnPressRect(
 
   const el = document.createElement("div");
   el.style.border = `2px solid ${color}`;
-  el.style.background = "rgba(255,59,48,0.08)";
+  el.style.background = fillColor;
   el.style.pointerEvents = "none";
   dragRef.current.overlayEl = el;
 

@@ -48,6 +48,11 @@ const IMAGES_API =
 const OLGA_API =
   process.env.REACT_APP_OLGA_API?.trim() || "http://localhost:9091";
 
+  const INSTANSEG_API =
+  process.env.REACT_APP_INSTANSEG_API?.trim() ||
+  `${window.location.protocol}//${window.location.hostname}:8010`;
+
+
 type SourceType = "dzi" | "image";
 type DrawTool = AnnotationType;
 type Severity = NonNullable<BaseAnnotation["severity"]>;
@@ -147,6 +152,15 @@ export default function OpenSeadragonUrlViewer(
     "create",
   );
 
+  const [moveMode, setMoveMode] = useState(false);
+  const [reshapeMode, setReshapeMode] = useState(false);
+
+  const [capturePreviewOpen, setCapturePreviewOpen] = useState(false);
+  const [capturePreviewUrl, setCapturePreviewUrl] = useState<string | null>(null);
+
+  const [aiSegmentationMode, setAiSegmentationMode] = useState(false);
+  const [instansegLoading, setInstansegLoading] = useState(false);
+
   const [olgaForm, setOlgaForm] = useState<OlgaFormResponse | null>(null);
   const [olgaFormLoading, setOlgaFormLoading] = useState(false);
   const [olgaFormError, setOlgaFormError] = useState<string | null>(null);
@@ -155,6 +169,56 @@ export default function OpenSeadragonUrlViewer(
   const dragRef = useRef<DragRefState>({
     active: false,
     startImage: null,
+    overlayEl: null,
+  });
+
+  const annotationsRef = useRef<Annotation[]>([]);
+  const detailOpenRef = useRef(false);
+
+  useEffect(() => {
+    annotationsRef.current = annotations;
+  }, [annotations]);
+
+  useEffect(() => {
+    detailOpenRef.current = detailOpen;
+  }, [detailOpen]);
+
+  type CaptureDragState = {
+    active: boolean;
+    startPx: { x: number; y: number } | null;
+    overlayEl: HTMLDivElement | null;
+  };
+
+  type EditDragState = {
+    active: boolean;
+    annotationId: string | null;
+    kind: "move" | "reshape" | null;
+    handleIndex: number | null;
+    startImage: { x: number; y: number } | null;
+    original: Annotation | null;
+  };
+
+  type ShapeHandle = {
+    annotationId: string;
+    index: number;
+    x: number;
+    y: number;
+  };
+
+  const editDragRef = useRef<EditDragState>({
+    active: false,
+    annotationId: null,
+    kind: null,
+    handleIndex: null,
+    startImage: null,
+    original: null,
+  });
+
+  const [captureMode, setCaptureMode] = useState(false);
+
+  const captureDragRef = useRef<CaptureDragState>({
+    active: false,
+    startPx: null,
     overlayEl: null,
   });
 
@@ -178,6 +242,158 @@ export default function OpenSeadragonUrlViewer(
     } catch {
       return { id: null, name: null };
     }
+  }
+
+  function cleanupCaptureOverlay() {
+    const viewer = viewerRef.current;
+    const overlayEl = captureDragRef.current.overlayEl;
+
+    if (viewer && overlayEl) {
+      try {
+        viewer.removeOverlay(overlayEl);
+      } catch {
+        // ignore
+      }
+    }
+
+    captureDragRef.current.active = false;
+    captureDragRef.current.startPx = null;
+    captureDragRef.current.overlayEl = null;
+  }
+
+  function getViewerDrawerCanvas(): HTMLCanvasElement | null {
+    const viewer = viewerRef.current;
+    if (!viewer) return null;
+
+    const anyViewer = viewer as any;
+    const canvas =
+      anyViewer?.drawer?.canvas ||
+      anyViewer?.drawer?.context?.canvas ||
+      containerRef.current?.querySelector("canvas");
+
+    return canvas instanceof HTMLCanvasElement ? canvas : null;
+  }
+
+  function showCapturedImageInModal(dataUrl: string) {
+    setCapturePreviewUrl(dataUrl);
+    setCapturePreviewOpen(true);
+  }
+
+  function exportCaptureFromSelection(rectPx: {
+    x: number;
+    y: number;
+    w: number;
+    h: number;
+  }) {
+    const canvas = getViewerDrawerCanvas();
+    const container = containerRef.current;
+
+    if (!canvas || !container) {
+      alert("Capture impossible : canvas OpenSeadragon introuvable.");
+      return;
+    }
+
+    const displayW = container.clientWidth;
+    const displayH = container.clientHeight;
+
+    if (!displayW || !displayH) {
+      alert("Capture impossible : dimensions du viewer invalides.");
+      return;
+    }
+
+    const sx = canvas.width / displayW;
+    const sy = canvas.height / displayH;
+
+    const srcX = Math.max(0, Math.round(rectPx.x * sx));
+    const srcY = Math.max(0, Math.round(rectPx.y * sy));
+    const srcW = Math.max(1, Math.round(rectPx.w * sx));
+    const srcH = Math.max(1, Math.round(rectPx.h * sy));
+
+    const safeW = Math.min(srcW, canvas.width - srcX);
+    const safeH = Math.min(srcH, canvas.height - srcY);
+
+    if (safeW <= 0 || safeH <= 0) {
+      alert("Zone de capture invalide.");
+      return;
+    }
+
+    const out = document.createElement("canvas");
+    out.width = safeW;
+    out.height = safeH;
+
+    const ctx = out.getContext("2d");
+    if (!ctx) {
+      alert("Capture impossible : contexte canvas indisponible.");
+      return;
+    }
+
+    ctx.drawImage(
+      canvas,
+      srcX,
+      srcY,
+      safeW,
+      safeH,
+      0,
+      0,
+      safeW,
+      safeH,
+    );
+
+    try {
+      const dataUrl = out.toDataURL("image/jpeg", 0.95);
+      showCapturedImageInModal(dataUrl);
+    } catch (err) {
+      console.error("Erreur export canvas:", err);
+      alert("Capture impossible : le canvas est bloqué par la politique CORS des tiles.");
+    }
+  }
+
+  function exportCaptureBlobFromSelection(rectPx: { x: number; y: number; w: number; h: number }) {
+    const canvas = getViewerDrawerCanvas();
+    const container = containerRef.current;
+
+    if (!canvas || !container) {
+      throw new Error("Canvas OpenSeadragon introuvable.");
+    }
+
+    const displayW = container.clientWidth;
+    const displayH = container.clientHeight;
+
+    const sx = canvas.width / displayW;
+    const sy = canvas.height / displayH;
+
+    const srcX = Math.max(0, Math.round(rectPx.x * sx));
+    const srcY = Math.max(0, Math.round(rectPx.y * sy));
+    const srcW = Math.max(1, Math.round(rectPx.w * sx));
+    const srcH = Math.max(1, Math.round(rectPx.h * sy));
+
+    const safeW = Math.min(srcW, canvas.width - srcX);
+    const safeH = Math.min(srcH, canvas.height - srcY);
+
+    if (safeW <= 0 || safeH <= 0) {
+      throw new Error("Zone de capture invalide.");
+    }
+
+    const out = document.createElement("canvas");
+    out.width = safeW;
+    out.height = safeH;
+
+    const ctx = out.getContext("2d");
+    if (!ctx) {
+      throw new Error("Contexte canvas indisponible.");
+    }
+
+    ctx.drawImage(canvas, srcX, srcY, safeW, safeH, 0, 0, safeW, safeH);
+
+    return new Promise<Blob>((resolve, reject) => {
+      out.toBlob((blob) => {
+        if (!blob) {
+          reject(new Error("Impossible de convertir la capture en blob."));
+          return;
+        }
+        resolve(blob);
+      }, "image/png");
+    });
   }
 
   function canEditAnnotation(ann: Annotation | null) {
@@ -325,6 +541,48 @@ export default function OpenSeadragonUrlViewer(
     resetFormFields();
   }
 
+  function reshapeAnnotation(ann: Annotation, handleIndex: number, x: number, y: number): Annotation {
+    if (ann.type === "rect") {
+      const x1 = ann.x;
+      const y1 = ann.y;
+      const x2 = ann.x + ann.w;
+      const y2 = ann.y + ann.h;
+
+      let nx1 = x1, ny1 = y1, nx2 = x2, ny2 = y2;
+
+      if (handleIndex === 0) { nx1 = x; ny1 = y; }
+      if (handleIndex === 1) { nx2 = x; ny1 = y; }
+      if (handleIndex === 2) { nx2 = x; ny2 = y; }
+      if (handleIndex === 3) { nx1 = x; ny2 = y; }
+
+      const rx = Math.min(nx1, nx2);
+      const ry = Math.min(ny1, ny2);
+      const rw = Math.max(1, Math.abs(nx2 - nx1));
+      const rh = Math.max(1, Math.abs(ny2 - ny1));
+
+      return { ...ann, x: rx, y: ry, w: rw, h: rh };
+    }
+
+    if (ann.type === "circle") {
+      if (handleIndex === 0 || handleIndex === 1) {
+        return { ...ann, rx: Math.max(1, Math.abs(x - ann.cx)) };
+      }
+      if (handleIndex === 2 || handleIndex === 3) {
+        return { ...ann, ry: Math.max(1, Math.abs(y - ann.cy)) };
+      }
+      return ann;
+    }
+
+    if (ann.type === "polygon") {
+      const nextPoints = ann.points.map((p, idx) =>
+        idx === handleIndex ? { x, y } : p
+      );
+      return { ...ann, points: nextPoints };
+    }
+
+    return ann;
+  }
+
   useEffect(() => {
     let cancelled = false;
 
@@ -367,6 +625,91 @@ export default function OpenSeadragonUrlViewer(
     };
   }, []);
 
+  useEffect(() => {
+    const viewer = viewerRef.current;
+    if (!viewer || !reshapeMode) return;
+
+    const imagePointFromEvt = (evt: any) => {
+      const webPoint = evt.position as OpenSeadragon.Point;
+      return viewer.viewport.viewportToImageCoordinates(
+        viewer.viewport.pointFromPixel(webPoint)
+      );
+    };
+
+    const onPress = (evt: OpenSeadragon.OSDEvent<any>) => {
+      if (!reshapeMode || detailOpenRef.current) return;
+      evt.preventDefaultAction = true;
+
+      const p = imagePointFromEvt(evt);
+      const handle = findHandleAtPoint(annotationsRef.current, p.x, p.y);
+      if (!handle) return;
+
+      const ann = annotationsRef.current.find((a) => a.id === handle.annotationId);
+      if (!ann) return;
+
+      editDragRef.current.active = true;
+      editDragRef.current.annotationId = ann.id;
+      editDragRef.current.kind = "reshape";
+      editDragRef.current.handleIndex = handle.index;
+      editDragRef.current.startImage = { x: p.x, y: p.y };
+      editDragRef.current.original = cloneAnnotation(ann);
+      setSelectedAnnotation(ann);
+    };
+
+    const onDrag = (evt: OpenSeadragon.OSDEvent<any>) => {
+      if (!editDragRef.current.active || editDragRef.current.kind !== "reshape") return;
+      evt.preventDefaultAction = true;
+
+      const annId = editDragRef.current.annotationId;
+      const handleIndex = editDragRef.current.handleIndex;
+      if (!annId || handleIndex == null) return;
+
+      const p = imagePointFromEvt(evt);
+
+      setAnnotations((prev) =>
+        prev.map((a) =>
+          a.id === annId
+            ? {
+                ...reshapeAnnotation(a, handleIndex, p.x, p.y),
+                updatedAt: new Date().toISOString(),
+              }
+            : a
+        )
+      );
+    };
+
+    const onRelease = async () => {
+      if (!editDragRef.current.active) return;
+
+      const annId = editDragRef.current.annotationId;
+
+      editDragRef.current.active = false;
+      editDragRef.current.annotationId = null;
+      editDragRef.current.kind = null;
+      editDragRef.current.handleIndex = null;
+      editDragRef.current.startImage = null;
+      editDragRef.current.original = null;
+
+      if (!annId || !imageKey) return;
+
+      const updated = annotationsRef.current.find((a) => a.id === annId);
+      if (updated) {
+        saveAnnotations(imageKey, annotationsRef.current);
+        await persistAnnotationGeometry(updated);
+      }
+    };
+
+    viewer.addHandler("canvas-press", onPress);
+    viewer.addHandler("canvas-drag", onDrag);
+    viewer.addHandler("canvas-release", onRelease);
+
+    return () => {
+      viewer.removeHandler("canvas-press", onPress);
+      viewer.removeHandler("canvas-drag", onDrag);
+      viewer.removeHandler("canvas-release", onRelease);
+    };
+  }, [reshapeMode, imageKey]);
+
   async function fetchAnnotationsForImage(
     imgId: string,
   ): Promise<ApiAnnotationRow[]> {
@@ -385,6 +728,233 @@ export default function OpenSeadragonUrlViewer(
       throw new Error(`GET annotation failed: ${res.status} - ${text}`);
     }
     return (await res.json()) as ApiAnnotationRow[];
+  }
+
+  async function runInstantSegOnSelection(rectPx: { x: number; y: number; w: number; h: number }) {
+    if (!imageKey) return;
+
+    setInstansegLoading(true);
+
+    try {
+      const viewer = viewerRef.current;
+      if (!viewer) throw new Error("Viewer indisponible");
+
+      const topLeftVp = viewer.viewport.pointFromPixel(
+        new OpenSeadragon.Point(rectPx.x, rectPx.y),
+        true
+      );
+      const bottomRightVp = viewer.viewport.pointFromPixel(
+        new OpenSeadragon.Point(rectPx.x + rectPx.w, rectPx.y + rectPx.h),
+        true
+      );
+
+      const topLeftImg = viewer.viewport.viewportToImageCoordinates(topLeftVp);
+      const bottomRightImg = viewer.viewport.viewportToImageCoordinates(bottomRightVp);
+
+      const offsetX = Math.min(topLeftImg.x, bottomRightImg.x);
+      const offsetY = Math.min(topLeftImg.y, bottomRightImg.y);
+
+      const blob = await exportCaptureBlobFromSelection(rectPx);
+
+      const formData = new FormData();
+      formData.append("image", blob, "instanseg-crop.png");
+      formData.append("offset_x", String(offsetX));
+      formData.append("offset_y", String(offsetY));
+
+      const res = await fetch(`${INSTANSEG_API}/api/instanseg/segment`, {
+        method: "POST",
+        headers: {
+          ...authHeaders(),
+        },
+        body: formData,
+      });
+
+      if (!res.ok) {
+        const txt = await res.text();
+        throw new Error(txt || "Erreur InstantSeg");
+      }
+
+      const data = await res.json();
+
+      const currentUser = getCurrentUser();
+      const now = new Date().toISOString();
+
+      const aiAnnotations: Annotation[] = (data.annotations || []).map((ann: any, idx: number) => ({
+        id: `tmp-ia-${Date.now()}-${idx}`,
+        type: "polygon",
+        points: ann.points,
+        label: ann.label || `InstantSeg ${idx + 1}`,
+        severity: "Moyenne",
+        category: "Zone suspecte",
+        description: "Annotation générée automatiquement par InstantSeg",
+        recommendation: null,
+        tags: ["IA", "InstantSeg"],
+        ownerId: currentUser.id,
+        ownerName: "InstantSeg",
+        createdAt: now,
+        updatedAt: now,
+        _source: "ia",
+        strokeColor: "#7c3aed",
+        fillColor: "rgba(124,58,237,0.18)",
+        strokeWidth: 2,
+        confidence: ann.confidence ?? null,
+        notes: "Segmentation automatique",
+      }));
+
+      setAnnotations((prev) => {
+        const next = [...prev, ...aiAnnotations];
+        saveAnnotations(imageKey, next);
+        return next;
+      });
+
+      await persistAiAnnotations(aiAnnotations);
+
+      setAiSegmentationMode(false);
+    } catch (e: any) {
+      console.error("InstantSeg error:", e);
+      alert(`Erreur InstantSeg: ${e.message || e}`);
+    } finally {
+      setInstansegLoading(false);
+    }
+  }
+
+  async function putAnnotationToApi(args: {
+    imageId: string;
+    caseId: string;
+    ann: Annotation;
+  }) {
+    const { imageId: imgId, caseId: cId, ann } = args;
+
+    const payload = {
+      image_id: imgId,
+      case_id: cId,
+      type: ann.type,
+      label: ann.label ?? "",
+      severity: ann.severity ?? "Moyenne",
+      category: ann.category ?? null,
+      description: ann.description ?? null,
+      recommendation: ann.recommendation ?? null,
+      tags: ann.tags ?? [],
+      stroke_color: ann.strokeColor ?? "#ff3b30",
+      fill_color: ann.fillColor ?? "rgba(255,59,48,0.08)",
+      stroke_width: ann.strokeWidth ?? 2,
+      confidence: ann.confidence ?? null,
+      notes: ann.notes ?? null,
+      coordinates: buildCoordinatesPayload(ann),
+    };
+
+    const res = await fetch(`${IMAGES_API}/api/annotations/${ann.id}`, {
+      method: "PUT",
+      headers: {
+        "Content-Type": "application/json",
+        ...authHeaders(),
+      },
+      body: JSON.stringify(payload),
+    });
+
+    if (!res.ok) {
+      const text = await res.text().catch(() => "");
+      throw new Error(`PUT annotation failed: ${res.status} - ${text}`);
+    }
+
+    return await res.json();
+  }
+
+  async function persistAnnotationGeometry(ann: Annotation) {
+    if (!imageId || !caseId || !ann.id || String(ann.id).startsWith("tmp-")) return;
+
+    try {
+      const saved = await putAnnotationToApi({ imageId, caseId, ann });
+
+      setAnnotations((prev) =>
+        prev.map((a) =>
+          a.id === ann.id
+            ? {
+                ...a,
+                updatedAt: saved.updated_at ?? saved.updatedAt ?? new Date().toISOString(),
+              }
+            : a
+        )
+      );
+    } catch (e) {
+      console.error("Erreur persistance géométrie annotation:", e);
+      alert("La mise à jour de la forme a échoué.");
+    }
+  }
+
+  async function persistAiAnnotations(list: Annotation[]) {
+    if (!imageId || !caseId || !imageKey) return;
+
+    for (const ann of list) {
+      try {
+        const saved = await postAnnotationToApi({ imageId, caseId, ann });
+
+        setAnnotations((prev) => {
+          const next = prev.map((a) =>
+            a.id === ann.id
+              ? {
+                  ...a,
+                  id: saved.id || a.id,
+                  _source: "ia",
+                  createdAt: saved.created_at ?? a.createdAt,
+                  updatedAt: saved.updated_at ?? a.updatedAt,
+                }
+              : a
+          );
+          saveAnnotations(imageKey, next);
+          return next;
+        });
+      } catch (e) {
+        console.error("Erreur sauvegarde annotation IA:", e);
+      }
+    }
+  }
+
+  function getShapeHandles(ann: Annotation): ShapeHandle[] {
+    if (ann.type === "rect") {
+      return [
+        { annotationId: ann.id, index: 0, x: ann.x, y: ann.y },
+        { annotationId: ann.id, index: 1, x: ann.x + ann.w, y: ann.y },
+        { annotationId: ann.id, index: 2, x: ann.x + ann.w, y: ann.y + ann.h },
+        { annotationId: ann.id, index: 3, x: ann.x, y: ann.y + ann.h },
+      ];
+    }
+
+    if (ann.type === "circle") {
+      return [
+        { annotationId: ann.id, index: 0, x: ann.cx - ann.rx, y: ann.cy },
+        { annotationId: ann.id, index: 1, x: ann.cx + ann.rx, y: ann.cy },
+        { annotationId: ann.id, index: 2, x: ann.cx, y: ann.cy - ann.ry },
+        { annotationId: ann.id, index: 3, x: ann.cx, y: ann.cy + ann.ry },
+      ];
+    }
+
+    if (ann.type === "polygon") {
+      return ann.points.map((p, idx) => ({
+        annotationId: ann.id,
+        index: idx,
+        x: p.x,
+        y: p.y,
+      }));
+    }
+
+    return [];
+  }
+
+  function findHandleAtPoint(list: Annotation[], x: number, y: number, tolerance = 80): ShapeHandle | null {
+    for (let i = list.length - 1; i >= 0; i -= 1) {
+      const ann = list[i];
+      if (!canEditAnnotation(ann)) continue;
+      const handles = getShapeHandles(ann);
+      for (const h of handles) {
+        const dx = h.x - x;
+        const dy = h.y - y;
+        if (dx * dx + dy * dy <= tolerance * tolerance) {
+          return h;
+        }
+      }
+    }
+    return null;
   }
 
   function inferShapeTypeFromCoordinates(
@@ -409,6 +979,62 @@ export default function OpenSeadragonUrlViewer(
     }
 
     return "rect";
+  }
+
+  function cloneAnnotation<T extends Annotation>(ann: T): T {
+    return JSON.parse(JSON.stringify(ann));
+  }
+
+  function translateAnnotation(ann: Annotation, dx: number, dy: number): Annotation {
+    if (ann.type === "rect") {
+      return { ...ann, x: ann.x + dx, y: ann.y + dy };
+    }
+    if (ann.type === "circle") {
+      return { ...ann, cx: ann.cx + dx, cy: ann.cy + dy };
+    }
+    if (ann.type === "polygon") {
+      return {
+        ...ann,
+        points: ann.points.map((p) => ({ x: p.x + dx, y: p.y + dy })),
+      };
+    }
+    return ann;
+  }
+
+  function annotationContainsPoint(ann: Annotation, x: number, y: number): boolean {
+    if (ann.type === "rect") {
+      return x >= ann.x && x <= ann.x + ann.w && y >= ann.y && y <= ann.y + ann.h;
+    }
+
+    if (ann.type === "circle") {
+      const dx = (x - ann.cx) / Math.max(ann.rx, 1);
+      const dy = (y - ann.cy) / Math.max(ann.ry, 1);
+      return dx * dx + dy * dy <= 1;
+    }
+
+    if (ann.type === "polygon") {
+      let inside = false;
+      const pts = ann.points;
+      for (let i = 0, j = pts.length - 1; i < pts.length; j = i++) {
+        const xi = pts[i].x, yi = pts[i].y;
+        const xj = pts[j].x, yj = pts[j].y;
+        const intersect =
+          yi > y !== yj > y &&
+          x < ((xj - xi) * (y - yi)) / ((yj - yi) || 1e-9) + xi;
+        if (intersect) inside = !inside;
+      }
+      return inside;
+    }
+
+    return false;
+  }
+
+  function findTopAnnotationAtPoint(list: Annotation[], x: number, y: number): Annotation | null {
+    for (let i = list.length - 1; i >= 0; i -= 1) {
+      const ann = list[i];
+      if (annotationContainsPoint(ann, x, y)) return ann;
+    }
+    return null;
   }
 
   function mapApiAnnotationToFrontend(a: ApiAnnotationRow): Annotation | null {
@@ -526,6 +1152,8 @@ export default function OpenSeadragonUrlViewer(
       prefixUrl: "/assets/openseadragon-images/",
       showNavigator: true,
       tileSources,
+      crossOriginPolicy: "Anonymous",
+      ajaxWithCredentials: false,
     });
 
     viewerRef.current = viewer;
@@ -563,16 +1191,46 @@ export default function OpenSeadragonUrlViewer(
     const viewer = viewerRef.current;
     if (!viewer) return;
 
-    const gs = viewer.gestureSettingsMouse;
-    viewer.gestureSettingsMouse = {
-      ...gs,
-      dragToPan: !annotateMode,
-      scrollToZoom: !annotateMode,
-      clickToZoom: !annotateMode,
-      dblClickToZoom: !annotateMode,
-      pinchToZoom: !annotateMode,
+    const interactionLocked =
+      annotateMode || captureMode || aiSegmentationMode || moveMode || reshapeMode;
+
+    const applyGestureLock = (settings: any) => ({
+      ...settings,
+      dragToPan: !interactionLocked,
+      scrollToZoom: !interactionLocked,
+      clickToZoom: !interactionLocked,
+      dblClickToZoom: !interactionLocked,
+      pinchToZoom: !interactionLocked,
+      flickEnabled: !interactionLocked,
+    });
+
+    viewer.gestureSettingsMouse = applyGestureLock(viewer.gestureSettingsMouse);
+    viewer.gestureSettingsTouch = applyGestureLock(viewer.gestureSettingsTouch);
+    viewer.gestureSettingsPen = applyGestureLock(viewer.gestureSettingsPen);
+    viewer.gestureSettingsUnknown = applyGestureLock(viewer.gestureSettingsUnknown);
+
+  }, [annotateMode, captureMode, aiSegmentationMode, moveMode, reshapeMode]);
+
+
+  useEffect(() => {
+    const viewer = viewerRef.current;
+    if (!viewer) return;
+
+    const blockClickZoom = (evt: OpenSeadragon.OSDEvent<any>) => {
+      if (moveMode || reshapeMode || annotateMode || captureMode || aiSegmentationMode) {
+        evt.preventDefaultAction = true;
+      }
     };
-  }, [annotateMode]);
+
+    viewer.addHandler("canvas-click", blockClickZoom);
+    viewer.addHandler("canvas-double-click", blockClickZoom);
+
+    return () => {
+      viewer.removeHandler("canvas-click", blockClickZoom);
+      viewer.removeHandler("canvas-double-click", blockClickZoom);
+    };
+  }, [moveMode, reshapeMode, annotateMode, captureMode, aiSegmentationMode]);
+
 
   useEffect(() => {
     if (annotateMode) return;
@@ -604,7 +1262,7 @@ export default function OpenSeadragonUrlViewer(
 
   useEffect(() => {
     const viewer = viewerRef.current;
-    if (!viewer || !canAnnotate) return;
+    if (!viewer || !canAnnotate || !annotateMode) return;
 
     let attached = false;
 
@@ -618,7 +1276,14 @@ export default function OpenSeadragonUrlViewer(
         evt.preventDefaultAction = true;
 
         if (drawTool === "rect") {
-          const [el, imagePoint] = drawOnPressRect(evt, viewer, dragRef as any);
+          const [el, imagePoint] = drawOnPressRect(
+            evt,
+            viewer,
+            dragRef as any,
+            drawStrokeColor,
+            drawFillColor
+          );
+          el.style.borderWidth = `${drawStrokeWidth}px`;
           el.dataset.kind = "temp";
           viewer.addOverlay({
             element: el,
@@ -634,7 +1299,10 @@ export default function OpenSeadragonUrlViewer(
             evt,
             viewer,
             dragRef as any,
+            drawStrokeColor,
+            drawFillColor
           );
+          el.style.borderWidth = `${drawStrokeWidth}px`;
           el.dataset.kind = "temp";
           viewer.addOverlay({
             element: el,
@@ -646,7 +1314,11 @@ export default function OpenSeadragonUrlViewer(
             }),
           });
         } else if (drawTool === "polygon") {
-          polygonAddPoint(evt, viewer, dragRef as any);
+          polygonAddPoint(evt, viewer, dragRef as any, {
+            strokeColor: drawStrokeColor,
+            fillColor: drawFillColor,
+            strokeWidth: drawStrokeWidth,
+          });
         }
       };
 
@@ -771,6 +1443,258 @@ export default function OpenSeadragonUrlViewer(
     };
   }, [annotateMode, canAnnotate, drawTool, detailOpen]);
 
+  useEffect(() => {
+    const viewer = viewerRef.current;
+    const container = containerRef.current;
+    if (!viewer || !container) return;
+    if (!captureMode && !aiSegmentationMode) return;
+
+    let attached = false;
+
+    const attach = () => {
+      if (attached) return;
+      attached = true;
+
+      const makeOverlayRect = () => {
+        const el = document.createElement("div");
+        el.style.boxSizing = "border-box";
+        el.style.border = "2px dashed #2563eb";
+        el.style.background = "rgba(37,99,235,0.10)";
+        el.style.pointerEvents = "none";
+        el.style.borderRadius = "4px";
+        el.dataset.kind = "capture";
+        return el;
+      };
+
+      const getLocalPoint = (evt: any) => {
+        const bounds = container.getBoundingClientRect();
+        const p = evt.position as OpenSeadragon.Point | undefined;
+
+        if (p && Number.isFinite(p.x) && Number.isFinite(p.y)) {
+          return {
+            x: Math.max(0, Math.min(bounds.width, p.x)),
+            y: Math.max(0, Math.min(bounds.height, p.y)),
+          };
+        }
+
+        const oe = evt.originalEvent as MouseEvent | PointerEvent | undefined;
+        const clientX = oe?.clientX ?? bounds.left;
+        const clientY = oe?.clientY ?? bounds.top;
+
+        return {
+          x: Math.max(0, Math.min(bounds.width, clientX - bounds.left)),
+          y: Math.max(0, Math.min(bounds.height, clientY - bounds.top)),
+        };
+      };
+
+      const isSelectionModeActive = () => captureMode || aiSegmentationMode;
+
+      const onPress = (evt: OpenSeadragon.OSDEvent<any>) => {
+        if (!isSelectionModeActive() || detailOpen) return;
+
+        evt.preventDefaultAction = true;
+
+        cleanupCaptureOverlay();
+
+        const start = getLocalPoint(evt);
+        console.log("InstantSeg press", start);
+
+        const el = makeOverlayRect();
+
+        captureDragRef.current.active = true;
+        captureDragRef.current.startPx = start;
+        captureDragRef.current.overlayEl = el;
+
+        viewer.addOverlay({
+          element: el,
+          location: new OpenSeadragon.Rect(0, 0, 0, 0),
+        });
+      };
+
+      const onDrag = (evt: OpenSeadragon.OSDEvent<any>) => {
+        if (!isSelectionModeActive() || !captureDragRef.current.active) return;
+
+        evt.preventDefaultAction = true;
+
+        const start = captureDragRef.current.startPx;
+        const el = captureDragRef.current.overlayEl;
+        if (!start || !el) return;
+
+        const p = getLocalPoint(evt);
+        console.log("InstantSeg drag", { start, current: p });
+
+        const x = Math.min(start.x, p.x);
+        const y = Math.min(start.y, p.y);
+        const w = Math.abs(p.x - start.x);
+        const h = Math.abs(p.y - start.y);
+
+        const topLeftVp = viewer.viewport.pointFromPixel(
+          new OpenSeadragon.Point(x, y),
+          true
+        );
+        const bottomRightVp = viewer.viewport.pointFromPixel(
+          new OpenSeadragon.Point(x + w, y + h),
+          true
+        );
+
+        viewer.updateOverlay(
+          el,
+          new OpenSeadragon.Rect(
+            topLeftVp.x,
+            topLeftVp.y,
+            bottomRightVp.x - topLeftVp.x,
+            bottomRightVp.y - topLeftVp.y
+          )
+        );
+      };
+
+      const onRelease = (evt: OpenSeadragon.OSDEvent<any>) => {
+        if (!isSelectionModeActive() || !captureDragRef.current.active) return;
+
+        evt.preventDefaultAction = true;
+
+        const start = captureDragRef.current.startPx;
+        if (!start) {
+          cleanupCaptureOverlay();
+          return;
+        }
+
+        const p = getLocalPoint(evt);
+
+        const x = Math.min(start.x, p.x);
+        const y = Math.min(start.y, p.y);
+        const w = Math.abs(p.x - start.x);
+        const h = Math.abs(p.y - start.y);
+
+        console.log("InstantSeg release", { x, y, w, h, aiSegmentationMode });
+
+        cleanupCaptureOverlay();
+
+        if (w < 8 || h < 8) return;
+
+        if (aiSegmentationMode) {
+          void runInstantSegOnSelection({ x, y, w, h });
+          setAiSegmentationMode(false);
+          return;
+        }
+
+        exportCaptureFromSelection({ x, y, w, h });
+        setCaptureMode(false);
+      };
+
+      viewer.addHandler("canvas-press", onPress);
+      viewer.addHandler("canvas-drag", onDrag);
+      viewer.addHandler("canvas-release", onRelease);
+
+      (attach as any)._cleanup = () => {
+        viewer.removeHandler("canvas-press", onPress);
+        viewer.removeHandler("canvas-drag", onDrag);
+        viewer.removeHandler("canvas-release", onRelease);
+      };
+    };
+
+    if (viewer.world && viewer.world.getItemCount() > 0) {
+      attach();
+    } else {
+      viewer.addOnceHandler("open", attach);
+    }
+
+    return () => {
+      cleanupCaptureOverlay();
+      try {
+        viewer.removeHandler("open", attach);
+        const cleanup = (attach as any)._cleanup as undefined | (() => void);
+        if (cleanup) cleanup();
+      } catch {
+        // ignore
+      }
+    };
+  }, [captureMode, aiSegmentationMode, detailOpen, sourceUrl]);
+
+  useEffect(() => {
+    const viewer = viewerRef.current;
+    if (!viewer || !moveMode) return;
+
+    const imagePointFromEvt = (evt: any) => {
+      const webPoint = evt.position as OpenSeadragon.Point;
+      return viewer.viewport.viewportToImageCoordinates(
+        viewer.viewport.pointFromPixel(webPoint)
+      );
+    };
+
+    const onPress = (evt: OpenSeadragon.OSDEvent<any>) => {
+      if (!moveMode || detailOpenRef.current) return;
+      evt.preventDefaultAction = true;
+
+      const p = imagePointFromEvt(evt);
+      const ann = findTopAnnotationAtPoint(annotationsRef.current, p.x, p.y);
+      if (!ann || !canEditAnnotation(ann)) return;
+
+      editDragRef.current.active = true;
+      editDragRef.current.annotationId = ann.id;
+      editDragRef.current.kind = "move";
+      editDragRef.current.handleIndex = null;
+      editDragRef.current.startImage = { x: p.x, y: p.y };
+      editDragRef.current.original = cloneAnnotation(ann);
+      setSelectedAnnotation(ann);
+    };
+
+    const onDrag = (evt: OpenSeadragon.OSDEvent<any>) => {
+      if (!editDragRef.current.active || editDragRef.current.kind !== "move") return;
+      evt.preventDefaultAction = true;
+
+      const start = editDragRef.current.startImage;
+      const original = editDragRef.current.original;
+      if (!start || !original) return;
+
+      const p = imagePointFromEvt(evt);
+      const dx = p.x - start.x;
+      const dy = p.y - start.y;
+
+      const moved = translateAnnotation(original, dx, dy);
+
+      setAnnotations((prev) =>
+        prev.map((a) =>
+          a.id === original.id
+            ? { ...moved, updatedAt: new Date().toISOString() }
+            : a
+        )
+      );
+      setSelectedAnnotation(moved);
+    };
+
+    const onRelease = async () => {
+      if (!editDragRef.current.active) return;
+
+      const annId = editDragRef.current.annotationId;
+
+      editDragRef.current.active = false;
+      editDragRef.current.annotationId = null;
+      editDragRef.current.kind = null;
+      editDragRef.current.handleIndex = null;
+      editDragRef.current.startImage = null;
+      editDragRef.current.original = null;
+
+      if (!annId || !imageKey) return;
+
+      const updated = annotationsRef.current.find((a) => a.id === annId);
+      if (updated) {
+        saveAnnotations(imageKey, annotationsRef.current);
+        await persistAnnotationGeometry(updated);
+      }
+    };
+
+    viewer.addHandler("canvas-press", onPress);
+    viewer.addHandler("canvas-drag", onDrag);
+    viewer.addHandler("canvas-release", onRelease);
+
+    return () => {
+      viewer.removeHandler("canvas-press", onPress);
+      viewer.removeHandler("canvas-drag", onDrag);
+      viewer.removeHandler("canvas-release", onRelease);
+    };
+  }, [moveMode, imageKey]);
+
   const finalizePolygon = () => {
     const viewer = viewerRef.current;
     if (!viewer) return;
@@ -794,7 +1718,38 @@ export default function OpenSeadragonUrlViewer(
 
   const onToggleAnnotate = () => {
     if (!canAnnotate) return;
+
+    cleanupCaptureOverlay();
+    setPendingAnn(null);
+    setDraftAnnotations([]);
+    setSelectedAnnotation(null);
+    setDetailOpen(false);
+
+    setCaptureMode(false);
+    setAiSegmentationMode(false);
+    setMoveMode(false);
+    setReshapeMode(false);
+
     setAnnotateMode((v) => !v);
+    setCapturePreviewOpen(false);
+    setCapturePreviewUrl(null);
+  };
+
+  const onToggleCapture = () => {
+    cleanupCaptureOverlay();
+    setPendingAnn(null);
+    setDraftAnnotations([]);
+    setSelectedAnnotation(null);
+    setDetailOpen(false);
+
+    setAnnotateMode(false);
+    setAiSegmentationMode(false);
+    setMoveMode(false);
+    setReshapeMode(false);
+
+    setCaptureMode((v) => !v);
+    setCapturePreviewOpen(false);
+    setCapturePreviewUrl(null);
   };
 
   const onClear = () => {
@@ -1020,6 +1975,78 @@ export default function OpenSeadragonUrlViewer(
             disabled={!canAnnotate}
             onClick={onToggleAnnotate}
             icon={IconPencil}
+          />
+          <ToolButton
+            title={captureMode ? "Mode capture (ON)" : "Mode capture (OFF)"}
+            active={captureMode}
+            disabled={false}
+            onClick={onToggleCapture}
+            icon={IconCamera}
+          />
+
+          <ToolButton
+            title={aiSegmentationMode ? "Segmentation IA (ON)" : "Segmentation IA (OFF)"}
+            active={aiSegmentationMode}
+            disabled={!canAnnotate}
+            onClick={() => {
+              cleanupCaptureOverlay();
+              setPendingAnn(null);
+              setDraftAnnotations([]);
+              setSelectedAnnotation(null);
+              setDetailOpen(false);
+              setCapturePreviewOpen(false);
+              setCapturePreviewUrl(null);
+
+              setAnnotateMode(false);
+              setCaptureMode(false);
+              setMoveMode(false);
+              setReshapeMode(false);
+
+              setAiSegmentationMode((v) => !v);
+            }}
+            icon={IconSparkles}
+          />
+
+          <ToolButton
+            title={moveMode ? "Déplacement (ON)" : "Déplacement (OFF)"}
+            active={moveMode}
+            disabled={!canAnnotate}
+            onClick={() => {
+              cleanupCaptureOverlay();
+              setPendingAnn(null);
+              setDraftAnnotations([]);
+              setSelectedAnnotation(null);
+              setDetailOpen(false);
+
+              setAnnotateMode(false);
+              setCaptureMode(false);
+              setAiSegmentationMode(false);
+              setReshapeMode(false);
+
+              setMoveMode((v) => !v);
+            }}
+            icon={IconMove}
+          />
+
+          <ToolButton
+            title={reshapeMode ? "Édition forme (ON)" : "Édition forme (OFF)"}
+            active={reshapeMode}
+            disabled={!canAnnotate}
+            onClick={() => {
+              cleanupCaptureOverlay();
+              setPendingAnn(null);
+              setDraftAnnotations([]);
+              setSelectedAnnotation(null);
+              setDetailOpen(false);
+
+              setAnnotateMode(false);
+              setCaptureMode(false);
+              setAiSegmentationMode(false);
+              setMoveMode(false);
+
+              setReshapeMode((v) => !v);
+            }}
+            icon={IconEditShape}
           />
         </div>
 
@@ -1458,7 +2485,7 @@ export default function OpenSeadragonUrlViewer(
 
                     setAnnotations((prev) => {
                       const next = prev.map((a) =>
-                        a.id === selectedAnnotation.id ? updated : a,
+                        a.id === selectedAnnotation.id ? updated : a
                       );
                       saveAnnotations(imageKey, next);
                       return next;
@@ -1468,9 +2495,12 @@ export default function OpenSeadragonUrlViewer(
                     setFormMode("view");
                     setDetailOpen(true);
 
-                    console.warn(
-                      "Edition locale uniquement: aucun endpoint backend PUT /annotations/{id} n'est appelé."
-                    );
+                    if (imageId && caseId && !String(updated.id).startsWith("tmp-")) {
+                      void putAnnotationToApi({ imageId, caseId, ann: updated }).catch((e) => {
+                        console.error("Erreur mise à jour annotation:", e);
+                        alert("La mise à jour de l’annotation a échoué.");
+                      });
+                    }
                   }}
                   style={modalStyles.primaryBtn}
                 >
@@ -1481,6 +2511,96 @@ export default function OpenSeadragonUrlViewer(
           </div>
         </div>
       )}
+
+      {capturePreviewOpen && capturePreviewUrl && (
+        <div
+          style={{
+            ...modalStyles.backdrop,
+            position: "fixed",
+            zIndex: 300,
+          }}
+          onClick={() => setCapturePreviewOpen(false)}
+        >
+          <div
+            style={{
+              width: "min(1100px, 92vw)",
+              maxHeight: "90vh",
+              background: "#fff",
+              borderRadius: 12,
+              border: "1px solid #e6e6e6",
+              boxShadow: "0 12px 30px rgba(0,0,0,0.18)",
+              padding: 16,
+              display: "flex",
+              flexDirection: "column",
+              gap: 12,
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div
+              style={{
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "space-between",
+                gap: 12,
+              }}
+            >
+              <div>
+                <div style={{ fontSize: 18, fontWeight: 700, color: "#0f172a" }}>
+                  Capture JPEG
+                </div>
+                <div style={{ fontSize: 13, color: "#64748b", marginTop: 4 }}>
+                  Aperçu de la zone capturée sans annotations visibles
+                </div>
+              </div>
+
+              <div style={{ display: "flex", gap: 8 }}>
+                <a
+                  href={capturePreviewUrl}
+                  download="capture-zone.jpg"
+                  style={modalStyles.primaryBtn}
+                >
+                  Télécharger
+                </a>
+                <button
+                  type="button"
+                  onClick={() => setCapturePreviewOpen(false)}
+                  style={modalStyles.secondaryBtn}
+                >
+                  Fermer
+                </button>
+              </div>
+            </div>
+
+            <div
+              style={{
+                flex: 1,
+                minHeight: 0,
+                overflow: "auto",
+                border: "1px solid #e2e8f0",
+                borderRadius: 12,
+                background: "#0f172a",
+                padding: 12,
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+              }}
+            >
+              <img
+                src={capturePreviewUrl}
+                alt="Capture WSI"
+                style={{
+                  maxWidth: "100%",
+                  maxHeight: "70vh",
+                  objectFit: "contain",
+                  borderRadius: 8,
+                  background: "white",
+                  boxShadow: "0 10px 30px rgba(0,0,0,0.25)",
+                }}
+              />
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -1488,6 +2608,7 @@ export default function OpenSeadragonUrlViewer(
 function redrawAll(
   viewer: OpenSeadragon.Viewer,
   annotations: Annotation[],
+  options?: { reshapeMode?: boolean; selectedId?: string | null }
 ): void {
   const overlays = ((viewer as any).currentOverlays ?? []) as Array<{
     element?: HTMLElement;
@@ -1890,6 +3011,66 @@ const formGridStyles: Record<string, React.CSSProperties> = {
   },
 };
 
+function IconCamera() {
+  return (
+    <svg width="18" height="18" viewBox="0 0 18 18" aria-hidden="true">
+      <path
+        d="M6 5.5l1-1.5h4l1 1.5h2a1 1 0 0 1 1 1V13a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V6.5a1 1 0 0 1 1-1h2Z"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.4"
+        strokeLinejoin="round"
+      />
+      <circle
+        cx="9"
+        cy="9.5"
+        r="2.5"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.4"
+      />
+    </svg>
+  );
+}
+
+function IconSparkles() {
+  return (
+    <svg width="18" height="18" viewBox="0 0 18 18" aria-hidden="true">
+      <path
+        d="M9 2l1.2 3.3L13.5 6.5l-3.3 1.2L9 11 7.8 7.7 4.5 6.5l3.3-1.2L9 2Z"
+        fill="currentColor"
+      />
+      <path
+        d="M14.5 11.5l.7 1.8 1.8.7-1.8.7-.7 1.8-.7-1.8-1.8-.7 1.8-.7.7-1.8Z"
+        fill="currentColor"
+      />
+    </svg>
+  );
+}
+
+function IconMove() {
+  return (
+    <svg width="18" height="18" viewBox="0 0 18 18" aria-hidden="true">
+      <path
+        d="M9 2l2 2H9.8v3.2H13V6l2 2-2 2V8.8H9.8V12H11l-2 2-2-2h1.2V8.8H5V10L3 8l2-2v1.2h3.2V4H7L9 2Z"
+        fill="currentColor"
+      />
+    </svg>
+  );
+}
+
+function IconEditShape() {
+  return (
+    <svg width="18" height="18" viewBox="0 0 18 18" aria-hidden="true">
+      <rect x="3" y="4" width="9" height="8" fill="none" stroke="currentColor" strokeWidth="1.4" />
+      <circle cx="12.5" cy="12.5" r="1.5" fill="currentColor" />
+      <circle cx="3" cy="4" r="1.2" fill="currentColor" />
+      <circle cx="12" cy="4" r="1.2" fill="currentColor" />
+      <circle cx="3" cy="12" r="1.2" fill="currentColor" />
+    </svg>
+  );
+}
+
 function IconRect() {
   return (
     <svg width="18" height="18" viewBox="0 0 18 18" aria-hidden="true">
@@ -1947,9 +3128,24 @@ function IconSliders() {
 
 function IconPencil() {
   return (
-    <svg width="18" height="18" viewBox="0 0 18 18" aria-hidden="true">
-      <path d="M4 12.5V14h1.5l7.6-7.6-1.5-1.5L4 12.5Z" fill="currentColor" />
-      <path d="M10.6 3.9l1.5 1.5" stroke="currentColor" strokeWidth="1.6" />
+    <svg width="18" height="18" viewBox="0 0 24 24" aria-hidden="true">
+      {/* corps du crayon */}
+      <path
+        d="M3 17.5L14.5 6c1-1 2.5-1 3.5 0l1 1c1 1 1 2.5 0 3.5L7.5 22H3v-4.5Z"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.6"
+        strokeLinejoin="round"
+      />
+
+      {/* pointe */}
+      <path
+        d="M3 22l3-1 2-2-2-2-2 2-1 3Z"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.6"
+        strokeLinejoin="round"
+      />
     </svg>
   );
 }
