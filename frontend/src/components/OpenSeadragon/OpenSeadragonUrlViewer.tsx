@@ -120,6 +120,13 @@ type OlgaFormResponse = {
   form?: OlgaField[];
 };
 
+type ShapeHandle = {
+  annotationId: string;
+  index: number;
+  x: number;
+  y: number;
+};
+
 
 export default function OpenSeadragonUrlViewer(
   props: OpenSeadragonUrlViewerProps,
@@ -134,6 +141,8 @@ export default function OpenSeadragonUrlViewer(
 
   const containerRef = useRef<HTMLDivElement | null>(null);
   const viewerRef = useRef<OpenSeadragon.Viewer | null>(null);
+
+  const [freePanMode, setFreePanMode] = useState(true);
 
   const [pendingAnn, setPendingAnn] = useState<Annotation | null>(null);
   const [draftAnnotations, setDraftAnnotations] = useState<Annotation[]>([]);
@@ -166,6 +175,11 @@ export default function OpenSeadragonUrlViewer(
   const [olgaFormError, setOlgaFormError] = useState<string | null>(null);
   const [formValues, setFormValues] = useState<Record<string, any>>({});
 
+  const [filterCategory, setFilterCategory] = useState("");
+  const [filterTag, setFilterTag] = useState("");
+  const [filterSeverity, setFilterSeverity] = useState("");
+  const [filterOwner, setFilterOwner] = useState("");
+
   const dragRef = useRef<DragRefState>({
     active: false,
     startImage: null,
@@ -174,6 +188,14 @@ export default function OpenSeadragonUrlViewer(
 
   const annotationsRef = useRef<Annotation[]>([]);
   const detailOpenRef = useRef(false);
+
+  const isOwnedSelectedAnnotation = !!selectedAnnotation && canEditAnnotation(selectedAnnotation);
+
+  const isExistingAnnotationView = detailOpen && !!selectedAnnotation && formMode === "view";
+
+  const isOwnedExistingAnnotationView = isExistingAnnotationView && isOwnedSelectedAnnotation;
+
+  const isForeignExistingAnnotationView = isExistingAnnotationView && !isOwnedSelectedAnnotation;
 
   useEffect(() => {
     annotationsRef.current = annotations;
@@ -196,13 +218,6 @@ export default function OpenSeadragonUrlViewer(
     handleIndex: number | null;
     startImage: { x: number; y: number } | null;
     original: Annotation | null;
-  };
-
-  type ShapeHandle = {
-    annotationId: string;
-    index: number;
-    x: number;
-    y: number;
   };
 
   const editDragRef = useRef<EditDragState>({
@@ -242,6 +257,33 @@ export default function OpenSeadragonUrlViewer(
     } catch {
       return { id: null, name: null };
     }
+  }
+
+  function switchToFreePanMode() {
+    cleanupCaptureOverlay();
+    setPendingAnn(null);
+    setDraftAnnotations([]);
+    setSelectedAnnotation(null);
+    setDetailOpen(false);
+
+    setAnnotateMode(false);
+    setCaptureMode(false);
+    setAiSegmentationMode(false);
+    setMoveMode(false);
+    setReshapeMode(false);
+
+    setCapturePreviewOpen(false);
+    setCapturePreviewUrl(null);
+    setDrawSettingsOpen(false);
+
+    setFreePanMode(true);
+  }
+
+  function finishTransientActionAndReturnToFreePan() {
+    cleanupCaptureOverlay();
+    setCaptureMode(false);
+    setAiSegmentationMode(false);
+    setFreePanMode(true);
   }
 
   function cleanupCaptureOverlay() {
@@ -795,8 +837,6 @@ export default function OpenSeadragonUrlViewer(
       const currentUser = getCurrentUser();
       const now = new Date().toISOString();
 
-      
-
       const aiAnnotations: Annotation[] = (data.annotations || [])
         .map((ann: any, idx: number) => ({
           id: `tmp-ia-${Date.now()}-${idx}`,
@@ -839,10 +879,11 @@ export default function OpenSeadragonUrlViewer(
 
       await persistAiAnnotations(aiAnnotations);
 
-      setAiSegmentationMode(false);
+      finishTransientActionAndReturnToFreePan();
     } catch (e: any) {
       console.error("InstantSeg error:", e);
       alert(`Erreur InstantSeg: ${e.message || e}`);
+      finishTransientActionAndReturnToFreePan();
     } finally {
       setInstansegLoading(false);
     }
@@ -1142,7 +1183,7 @@ export default function OpenSeadragonUrlViewer(
       return next;
     });
 
-    closeDetailModal();
+    switchToFreePanMode();
 
     try {
       if (!String(annToDelete.id).startsWith("tmp-")) {
@@ -1175,13 +1216,7 @@ export default function OpenSeadragonUrlViewer(
       return next;
     });
 
-    if (selectedAnnotation?.id === ann.id) {
-      setSelectedAnnotation(null);
-    }
-
-    if (detailOpenRef.current && selectedAnnotation?.id === ann.id) {
-      closeDetailModal();
-    }
+    switchToFreePanMode();
 
     try {
       if (!String(ann.id).startsWith("tmp-")) {
@@ -1667,16 +1702,18 @@ export default function OpenSeadragonUrlViewer(
 
         cleanupCaptureOverlay();
 
-        if (w < 8 || h < 8) return;
+        if (w < 8 || h < 8) {
+          finishTransientActionAndReturnToFreePan();
+          return;
+        }
 
         if (aiSegmentationMode) {
           void runInstantSegOnSelection({ x, y, w, h });
-          setAiSegmentationMode(false);
           return;
         }
 
         exportCaptureFromSelection({ x, y, w, h });
-        setCaptureMode(false);
+        finishTransientActionAndReturnToFreePan();
       };
 
       viewer.addHandler("canvas-press", onPress);
@@ -1827,7 +1864,12 @@ export default function OpenSeadragonUrlViewer(
     setMoveMode(false);
     setReshapeMode(false);
 
-    setAnnotateMode((v) => !v);
+    setAnnotateMode((prev) => {
+      const next = !prev;
+      setFreePanMode(!next);
+      return next;
+    });
+
     setCapturePreviewOpen(false);
     setCapturePreviewUrl(null);
   };
@@ -1844,7 +1886,12 @@ export default function OpenSeadragonUrlViewer(
     setMoveMode(false);
     setReshapeMode(false);
 
-    setCaptureMode((v) => !v);
+    setCaptureMode((prev) => {
+      const next = !prev;
+      setFreePanMode(!next);
+      return next;
+    });
+
     setCapturePreviewOpen(false);
     setCapturePreviewUrl(null);
   };
@@ -1857,14 +1904,13 @@ export default function OpenSeadragonUrlViewer(
 
     setAnnotations([]);
     saveAnnotations(imageKey, []);
-    setSelectedAnnotation(null);
+    switchToFreePanMode();
 
     try {
       await deleteAnnotationsFromApi(toDelete.map((a) => a.id));
     } catch (e) {
       console.error("Erreur suppression annotations API:", e);
 
-      // rollback si l’API échoue
       setAnnotations(toDelete);
       saveAnnotations(imageKey, toDelete);
       alert("La suppression des annotations a échoué côté serveur.");
@@ -1984,6 +2030,13 @@ export default function OpenSeadragonUrlViewer(
     return {};
   }
 
+  function resetAnnotationFilters() {
+    setFilterCategory("");
+    setFilterTag("");
+    setFilterSeverity("");
+    setFilterOwner("");
+  }
+
   const commitPendingAnnotation = async () => {
     if (!pendingAnn || !imageKey) return;
 
@@ -2079,15 +2132,74 @@ export default function OpenSeadragonUrlViewer(
     }
   };
 
+  const availableCategories = useMemo(() => {
+    return Array.from(
+      new Set(
+        annotations
+          .map((a) => (a.category || "").trim())
+          .filter(Boolean)
+      )
+    ).sort((a, b) => a.localeCompare(b, "fr"));
+  }, [annotations]);
+
+  const availableTags = useMemo(() => {
+    return Array.from(
+      new Set(
+        annotations.flatMap((a) =>
+          (a.tags || []).map((tag) => String(tag || "").trim()).filter(Boolean)
+        )
+      )
+    ).sort((a, b) => a.localeCompare(b, "fr"));
+  }, [annotations]);
+
+  const availableSeverities = useMemo(() => {
+    return Array.from(
+      new Set(
+        annotations
+          .map((a) => (a.severity || "").trim())
+          .filter(Boolean)
+      )
+    ).sort((a, b) => a.localeCompare(b, "fr"));
+  }, [annotations]);
+
+  const availableOwners = useMemo(() => {
+    return Array.from(
+      new Set(
+        annotations
+          .map((a) => (a.ownerName || a.ownerId || "").trim())
+          .filter(Boolean)
+      )
+    ).sort((a, b) => a.localeCompare(b, "fr"));
+  }, [annotations]);
+
   const annotationItems = useMemo(() => {
     return [...annotations]
-      .filter((a) => a && (a.type === "rect" || a.type === "circle" || a.type === "polygon"))
+      .filter(
+        (a) =>
+          a &&
+          (a.type === "rect" || a.type === "circle" || a.type === "polygon")
+      )
+      .filter((a) => {
+        if (filterCategory && (a.category || "") !== filterCategory) return false;
+
+        if (filterSeverity && (a.severity || "") !== filterSeverity) return false;
+
+        const ownerValue = a.ownerName || a.ownerId || "";
+        if (filterOwner && ownerValue !== filterOwner) return false;
+
+        if (filterTag) {
+          const tags = (a.tags || []).map((tag) => String(tag || "").trim());
+          if (!tags.includes(filterTag)) return false;
+        }
+
+        return true;
+      })
       .sort((a, b) => {
         const da = new Date(a.createdAt).getTime();
         const db = new Date(b.createdAt).getTime();
         return db - da;
       });
-  }, [annotations]);
+  }, [annotations, filterCategory, filterTag, filterSeverity, filterOwner]);
 
   return (
     <div
@@ -2100,6 +2212,14 @@ export default function OpenSeadragonUrlViewer(
     >
       <div style={styles.toolbar}>
         <div style={styles.group}>
+          <ToolButton
+            title="Déplacement libre"
+            active={freePanMode}
+            disabled={false}
+            onClick={switchToFreePanMode}
+            icon={IconMousePointer}
+          />
+
           <ToolButton
             title={
               annotateMode ? "Mode annotation (ON)" : "Mode annotation (OFF)"
@@ -2135,7 +2255,11 @@ export default function OpenSeadragonUrlViewer(
               setMoveMode(false);
               setReshapeMode(false);
 
-              setAiSegmentationMode((v) => !v);
+              setAiSegmentationMode((prev) => {
+                const next = !prev;
+                setFreePanMode(!next);
+                return next;
+              });
             }}
             icon={IconSparkles}
           />
@@ -2156,7 +2280,11 @@ export default function OpenSeadragonUrlViewer(
               setAiSegmentationMode(false);
               setReshapeMode(false);
 
-              setMoveMode((v) => !v);
+              setMoveMode((prev) => {
+                const next = !prev;
+                setFreePanMode(!next);
+                return next;
+              });
             }}
             icon={IconMove}
           />
@@ -2177,44 +2305,52 @@ export default function OpenSeadragonUrlViewer(
               setAiSegmentationMode(false);
               setMoveMode(false);
 
-              setReshapeMode((v) => !v);
+              setReshapeMode((prev) => {
+                const next = !prev;
+                setFreePanMode(!next);
+                return next;
+              });
             }}
             icon={IconEditShape}
           />
         </div>
 
-        <div style={styles.divider} />
+        {annotateMode && (
+          <>
+            <div style={styles.divider} />
 
-        <div style={styles.group}>
-          <ToolButton
-            title="Rectangle"
-            active={drawTool === "rect"}
-            disabled={!canAnnotate}
-            onClick={() => setDrawTool("rect")}
-            icon={IconRect}
-          />
-          <ToolButton
-            title="Cercle"
-            active={drawTool === "circle"}
-            disabled={!canAnnotate}
-            onClick={() => setDrawTool("circle")}
-            icon={IconCircle}
-          />
-          <ToolButton
-            title="Polygone"
-            active={drawTool === "polygon"}
-            disabled={!canAnnotate}
-            onClick={() => setDrawTool("polygon")}
-            icon={IconPolygon}
-          />
-          <ToolButton
-            title="Paramètres de dessin"
-            active={drawSettingsOpen}
-            disabled={!canAnnotate}
-            onClick={() => setDrawSettingsOpen((v) => !v)}
-            icon={IconSliders}
-          />
-        </div>
+            <div style={styles.group}>
+              <ToolButton
+                title="Rectangle"
+                active={drawTool === "rect"}
+                disabled={!canAnnotate}
+                onClick={() => setDrawTool("rect")}
+                icon={IconRect}
+              />
+              <ToolButton
+                title="Cercle"
+                active={drawTool === "circle"}
+                disabled={!canAnnotate}
+                onClick={() => setDrawTool("circle")}
+                icon={IconCircle}
+              />
+              <ToolButton
+                title="Polygone"
+                active={drawTool === "polygon"}
+                disabled={!canAnnotate}
+                onClick={() => setDrawTool("polygon")}
+                icon={IconPolygon}
+              />
+              <ToolButton
+                title="Paramètres de dessin"
+                active={drawSettingsOpen}
+                disabled={!canAnnotate}
+                onClick={() => setDrawSettingsOpen((v) => !v)}
+                icon={IconSliders}
+              />
+            </div>
+          </>
+        )}
 
         {drawTool === "polygon" && annotateMode && (
           <>
@@ -2238,7 +2374,7 @@ export default function OpenSeadragonUrlViewer(
           </>
         )}
 
-        {drawSettingsOpen && (
+        {annotateMode && drawSettingsOpen && (
           <div
             style={{
               display: "grid",
@@ -2317,10 +2453,81 @@ export default function OpenSeadragonUrlViewer(
         />
 
         <div style={styles.sidebar}>
-          <div style={styles.sidebarHeader}>Labels / annotations</div>
+          <div style={styles.sidebarHeader}>
+            <div style={styles.sidebarHeaderTop}>
+              <div>Labels / annotations</div>
+
+              <button
+                type="button"
+                onClick={resetAnnotationFilters}
+                style={styles.filterResetBtn}
+                disabled={
+                  !filterCategory && !filterTag && !filterSeverity && !filterOwner
+                }
+              >
+                Reset
+              </button>
+            </div>
+
+            <div style={styles.filterGrid}>
+              <select
+                value={filterCategory}
+                onChange={(e) => setFilterCategory(e.target.value)}
+                style={styles.filterSelect}
+              >
+                <option value="">Catégorie</option>
+                {availableCategories.map((value) => (
+                  <option key={value} value={value}>
+                    {value}
+                  </option>
+                ))}
+              </select>
+
+              <select
+                value={filterTag}
+                onChange={(e) => setFilterTag(e.target.value)}
+                style={styles.filterSelect}
+              >
+                <option value="">Tag</option>
+                {availableTags.map((value) => (
+                  <option key={value} value={value}>
+                    {value}
+                  </option>
+                ))}
+              </select>
+
+              <select
+                value={filterSeverity}
+                onChange={(e) => setFilterSeverity(e.target.value)}
+                style={styles.filterSelect}
+              >
+                <option value="">Grade / sévérité</option>
+                {availableSeverities.map((value) => (
+                  <option key={value} value={value}>
+                    {value}
+                  </option>
+                ))}
+              </select>
+
+              <select
+                value={filterOwner}
+                onChange={(e) => setFilterOwner(e.target.value)}
+                style={styles.filterSelect}
+              >
+                <option value="">Utilisateur</option>
+                {availableOwners.map((value) => (
+                  <option key={value} value={value}>
+                    {value}
+                  </option>
+                ))}
+              </select>
+            </div>
+          </div>
 
           {annotationItems.length === 0 ? (
-            <div style={styles.emptyState}>Aucune annotation</div>
+            <div style={styles.emptyState}>
+              Aucune annotation ne correspond aux filtres
+            </div>
           ) : (
             <div style={styles.annotationList}>
               {annotationItems.map((ann) => {
@@ -2408,193 +2615,217 @@ export default function OpenSeadragonUrlViewer(
                 justifyContent: "space-between",
                 alignItems: "center",
                 marginBottom: 12,
+                gap: 12,
               }}
             >
               <h3 style={{ margin: 0 }}>
                 {formMode === "create"
                   ? "Nouvelle annotation"
-                  : formMode === "edit"
-                    ? "Modifier l’annotation"
-                    : "Détail de l’annotation"}
+                  : "Détail de l’annotation"}
               </h3>
 
-              <div style={{ display: "flex", gap: 8 }}>
-                {selectedAnnotation &&
-                canEditAnnotation(selectedAnnotation) &&
-                formMode !== "create" && (
+              <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                {isOwnedExistingAnnotationView && (
+                  <>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setFormMode("edit");
+                      }}
+                      style={modalStyles.secondaryBtn}
+                    >
+                      Modifier
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => {
+                        void deleteSelectedAnnotation();
+                      }}
+                      style={{
+                        ...modalStyles.secondaryBtn,
+                        border: "1px solid #dc2626",
+                        color: "#dc2626",
+                      }}
+                    >
+                      Supprimer
+                    </button>
+                  </>
+                )}
+
+                {(isOwnedExistingAnnotationView || isForeignExistingAnnotationView) && (
                   <button
+                    type="button"
                     onClick={() => {
-                      void deleteSelectedAnnotation();
+                      closeDetailModal();
                     }}
-                    style={{
-                      ...modalStyles.secondaryBtn,
-                      border: "1px solid #dc2626",
-                      color: "#dc2626",
-                    }}
+                    style={modalStyles.secondaryBtn}
                   >
-                    Supprimer
+                    Fermer
                   </button>
                 )}
               </div>
             </div>
 
-            <div style={formGridStyles.grid}>
-              {olgaFormLoading && (
-                <div style={{ gridColumn: "1 / -1", color: "#475569" }}>
-                  Chargement du formulaire Olga...
-                </div>
-              )}
+            <div style={formGridStyles.scrollBody}>
+              <div style={formGridStyles.grid}>
+                {olgaFormLoading && (
+                  <div style={{ gridColumn: "1 / -1", color: "#475569" }}>
+                    Chargement du formulaire Olga...
+                  </div>
+                )}
 
-              {!olgaFormLoading && olgaFormError && (
-                <div style={{ gridColumn: "1 / -1", color: "#dc2626" }}>
-                  {olgaFormError}
-                </div>
-              )}
+                {!olgaFormLoading && olgaFormError && (
+                  <div style={{ gridColumn: "1 / -1", color: "#dc2626" }}>
+                    {olgaFormError}
+                  </div>
+                )}
 
-              {!olgaFormLoading &&
-                !olgaFormError &&
-                (olgaForm?.form?.length ?? 0) > 0 && (
-                  <>
-                    {olgaForm!.form!.map((field) => {
-                      const type = field.field_type?.toLowerCase?.() || "";
-                      const label = getOlgaFieldLabel(field);
-                      const value = getFieldValue(field.field_key, "");
-                      const disabled = formMode === "view";
+                {!olgaFormLoading &&
+                  !olgaFormError &&
+                  (olgaForm?.form?.length ?? 0) > 0 && (
+                    <>
+                      {olgaForm!.form!.map((field) => {
+                        const type = field.field_type?.toLowerCase?.() || "";
+                        const label = getOlgaFieldLabel(field);
+                        const value = getFieldValue(field.field_key, "");
+                        const disabled = formMode === "view";
 
-                      if (type.includes("textarea")) {
+                        if (type.includes("textarea")) {
+                          return (
+                            <label
+                              key={field.unique_id || field.field_key}
+                              style={{ ...modalStyles.label, gridColumn: "1 / -1" }}
+                            >
+                              {label}
+                              <textarea
+                                value={value}
+                                onChange={(e) =>
+                                  setFieldValue(field.field_key, e.target.value)
+                                }
+                                style={modalStyles.textarea}
+                                disabled={disabled}
+                                placeholder={field.field_hint || ""}
+                              />
+                            </label>
+                          );
+                        }
+
+                        if (type.includes("select")) {
+                          const selectOptions =
+                            field.options ||
+                            field.field_options?.options ||
+                            field.field_options?.values?.map((v: any) => ({
+                              label: v,
+                              value: v,
+                            })) ||
+                            [];
+
+                          return (
+                            <label key={field.unique_id || field.field_key} style={modalStyles.label}>
+                              {label}
+                              <select
+                                value={value}
+                                onChange={(e) => setFieldValue(field.field_key, e.target.value)}
+                                style={modalStyles.input}
+                                disabled={disabled}
+                              >
+                                <option value="">Sélectionner</option>
+
+                                {selectOptions.map((opt: any, idx: number) => {
+                                  const optionValue = opt.value ?? opt.label ?? "";
+                                  const optionLabel = opt.label ?? opt.value ?? "";
+
+                                  return (
+                                    <option
+                                      key={`${field.field_key}-${idx}`}
+                                      value={optionValue}
+                                    >
+                                      {optionLabel}
+                                    </option>
+                                  );
+                                })}
+                              </select>
+                            </label>
+                          );
+                        }
+
+                        if (type.includes("checkbox")) {
+                          return (
+                            <label
+                              key={field.unique_id || field.field_key}
+                              style={{
+                                ...modalStyles.label,
+                                display: "flex",
+                                alignItems: "center",
+                                gap: 8,
+                                marginTop: 24,
+                              }}
+                            >
+                              <input
+                                type="checkbox"
+                                checked={!!value}
+                                onChange={(e) =>
+                                  setFieldValue(field.field_key, e.target.checked)
+                                }
+                                disabled={disabled}
+                              />
+                              {label}
+                            </label>
+                          );
+                        }
+
                         return (
                           <label
                             key={field.unique_id || field.field_key}
-                            style={{ ...modalStyles.label, gridColumn: "1 / -1" }}
+                            style={modalStyles.label}
                           >
                             {label}
-                            <textarea
+                            <input
+                              type={type.includes("number") ? "number" : "text"}
                               value={value}
                               onChange={(e) =>
                                 setFieldValue(field.field_key, e.target.value)
                               }
-                              style={modalStyles.textarea}
+                              style={modalStyles.input}
                               disabled={disabled}
                               placeholder={field.field_hint || ""}
                             />
                           </label>
                         );
-                      }
+                      })}
+                    </>
+                  )}
 
-                      if (type.includes("select")) {
-                        const selectOptions =
-                          field.options ||
-                          field.field_options?.options ||
-                          field.field_options?.values?.map((v: any) => ({
-                            label: v,
-                            value: v,
-                          })) ||
-                          [];
+                {!olgaFormLoading &&
+                  !olgaFormError &&
+                  (!olgaForm?.form || olgaForm.form.length === 0) && (
+                    <div style={{ gridColumn: "1 / -1", color: "#64748b" }}>
+                      Aucun champ retourné par Olga pour le formulaire
+                      creationLabelPatho.
+                    </div>
+                  )}
 
-                        return (
-                          <label key={field.unique_id || field.field_key} style={modalStyles.label}>
-                            {label}
-                            <select
-                              value={value}
-                              onChange={(e) => setFieldValue(field.field_key, e.target.value)}
-                              style={modalStyles.input}
-                              disabled={disabled}
-                            >
-                              <option value="">Sélectionner</option>
-
-                              {selectOptions.map((opt: any, idx: number) => {
-                                const optionValue = opt.value ?? opt.label ?? "";
-                                const optionLabel = opt.label ?? opt.value ?? "";
-
-                                return (
-                                  <option
-                                    key={`${field.field_key}-${idx}`}
-                                    value={optionValue}
-                                  >
-                                    {optionLabel}
-                                  </option>
-                                );
-                              })}
-                            </select>
-                          </label>
-                        );
-                      }
-
-                      if (type.includes("checkbox")) {
-                        return (
-                          <label
-                            key={field.unique_id || field.field_key}
-                            style={{
-                              ...modalStyles.label,
-                              display: "flex",
-                              alignItems: "center",
-                              gap: 8,
-                              marginTop: 24,
-                            }}
-                          >
-                            <input
-                              type="checkbox"
-                              checked={!!value}
-                              onChange={(e) =>
-                                setFieldValue(field.field_key, e.target.checked)
-                              }
-                              disabled={disabled}
-                            />
-                            {label}
-                          </label>
-                        );
-                      }
-
-                      return (
-                        <label
-                          key={field.unique_id || field.field_key}
-                          style={modalStyles.label}
-                        >
-                          {label}
-                          <input
-                            type={type.includes("number") ? "number" : "text"}
-                            value={value}
-                            onChange={(e) =>
-                              setFieldValue(field.field_key, e.target.value)
-                            }
-                            style={modalStyles.input}
-                            disabled={disabled}
-                            placeholder={field.field_hint || ""}
-                          />
-                        </label>
-                      );
-                    })}
-                  </>
-                )}
-
-              {!olgaFormLoading &&
-                !olgaFormError &&
-                (!olgaForm?.form || olgaForm.form.length === 0) && (
-                  <div style={{ gridColumn: "1 / -1", color: "#64748b" }}>
-                    Aucun champ retourné par Olga pour le formulaire
-                    creationLabelPatho.
+                {selectedAnnotation && (
+                  <div style={formGridStyles.metaBox}>
+                    <div>
+                      <strong>Type :</strong> {selectedAnnotation.type}
+                    </div>
+                    <div>
+                      <strong>Créé le :</strong>{" "}
+                      {new Date(selectedAnnotation.createdAt).toLocaleString(
+                        "fr-FR",
+                      )}
+                    </div>
+                    <div>
+                      <strong>Propriétaire :</strong>{" "}
+                      {selectedAnnotation.ownerName ||
+                        selectedAnnotation.ownerId ||
+                        "Inconnu"}
+                    </div>
                   </div>
                 )}
-
-              {selectedAnnotation && (
-                <div style={formGridStyles.metaBox}>
-                  <div>
-                    <strong>Type :</strong> {selectedAnnotation.type}
-                  </div>
-                  <div>
-                    <strong>Créé le :</strong>{" "}
-                    {new Date(selectedAnnotation.createdAt).toLocaleString(
-                      "fr-FR",
-                    )}
-                  </div>
-                  <div>
-                    <strong>Propriétaire :</strong>{" "}
-                    {selectedAnnotation.ownerName ||
-                      selectedAnnotation.ownerId ||
-                      "Inconnu"}
-                  </div>
-                </div>
-              )}
+              </div>
             </div>
 
             {(formMode === "create" || formMode === "edit") && (
@@ -2604,18 +2835,27 @@ export default function OpenSeadragonUrlViewer(
                   justifyContent: "flex-end",
                   gap: 8,
                   marginTop: 14,
+                  flexShrink: 0,
                 }}
               >
                 <button
+                  type="button"
                   onClick={() => {
+                    if (formMode === "edit" && selectedAnnotation) {
+                      fillFormFromAnnotation(selectedAnnotation);
+                      setFormMode("view");
+                      return;
+                    }
+
                     closeDetailModal();
                   }}
                   style={modalStyles.secondaryBtn}
                 >
-                  Annuler
+                  {formMode === "edit" ? "Annuler" : "Annuler"}
                 </button>
 
                 <button
+                  type="button"
                   onClick={() => {
                     if (formMode === "create") {
                       void commitPendingAnnotation();
@@ -2647,7 +2887,6 @@ export default function OpenSeadragonUrlViewer(
 
                     setSelectedAnnotation(updated);
                     setFormMode("view");
-                    setDetailOpen(true);
 
                     if (imageId && caseId && !String(updated.id).startsWith("tmp-")) {
                       void putAnnotationToApi({ imageId, caseId, ann: updated }).catch((e) => {
@@ -2658,7 +2897,7 @@ export default function OpenSeadragonUrlViewer(
                   }}
                   style={modalStyles.primaryBtn}
                 >
-                  Enregistrer
+                  {formMode === "edit" ? "Enregistrer les modifications" : "Enregistrer"}
                 </button>
               </div>
             )}
@@ -2874,24 +3113,40 @@ function redrawAll(
       svg.style.pointerEvents = "none";
       svg.setAttribute("width", "100%");
       svg.setAttribute("height", "100%");
-      svg.setAttribute("viewBox", `${vbX} ${vbY} ${vbW} ${vbH}`);
+      svg.setAttribute("viewBox", "0 0 1 1");
       svg.style.overflow = "visible";
       (svg as any).dataset.kind = "persisted";
 
       const poly = document.createElementNS(svgNS, "polygon");
+
+      // Bounding box IMAGE
+      let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+      for (const p of ann.points) {
+        minX = Math.min(minX, p.x);
+        minY = Math.min(minY, p.y);
+        maxX = Math.max(maxX, p.x);
+        maxY = Math.max(maxY, p.y);
+      }
+
+      const width = Math.max(1, maxX - minX);
+      const height = Math.max(1, maxY - minY);
+
+      // Points NORMALISÉS (0 → 1)
+      const normalizedPoints = ann.points.map((p) => {
+        const nx = (p.x - minX) / width;
+        const ny = (p.y - minY) / height;
+        return `${nx},${ny}`;
+      });
+
+      poly.setAttribute("points", normalizedPoints.join(" "));
+
+      // style
       const fillInfo = (() => {
         const color = ann.fillColor ?? "rgba(255,59,48,0.18)";
-        if (color.startsWith("#")) {
-          return { fill: color, fillOpacity: "0.18" };
-        }
-
         const match = color.match(
-          /rgba?\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)(?:\s*,\s*([0-9.]+))?\s*\)/i
+          /rgba?\(\s*(\d+),\s*(\d+),\s*(\d+)(?:,\s*([0-9.]+))?\)/
         );
-
-        if (!match) {
-          return { fill: color, fillOpacity: "0.18" };
-        }
+        if (!match) return { fill: color, fillOpacity: "0.18" };
 
         return {
           fill: `rgb(${match[1]},${match[2]},${match[3]})`,
@@ -2906,33 +3161,19 @@ function redrawAll(
       poly.setAttribute("vector-effect", "non-scaling-stroke");
       poly.setAttribute("stroke-linejoin", "round");
       poly.setAttribute("stroke-linecap", "round");
-      poly.setAttribute(
-        "points",
-        vpts.map((p) => `${p.x},${p.y}`).join(" "),
-      );
 
       svg.appendChild(poly);
 
-      let minX = Infinity;
-      let minY = Infinity;
-      let maxX = -Infinity;
-      let maxY = -Infinity;
-
-      for (const p of ann.points) {
-        minX = Math.min(minX, p.x);
-        minY = Math.min(minY, p.y);
-        maxX = Math.max(maxX, p.x);
-        maxY = Math.max(maxY, p.y);
-      }
-
-      const rect = imageRectToViewportRect(viewer, {
-        x: minX,
-        y: minY,
-        w: maxX - minX,
-        h: maxY - minY,
+      // Overlay position = bbox image
+      viewer.addOverlay({
+        element: svg,
+        location: imageRectToViewportRect(viewer, {
+          x: minX,
+          y: minY,
+          w: width,
+          h: height,
+        }),
       });
-
-      viewer.addOverlay({ element: svg, location: rect });
 
       if (shouldShowHandles(ann)) {
         addResizeHandles(
@@ -3062,6 +3303,7 @@ const styles: Record<string, React.CSSProperties> = {
     borderRadius: 10,
     background: "#fff",
   },
+
   contentLayout: {
     display: "grid",
     gridTemplateColumns: "minmax(0,1fr) 300px",
@@ -3069,6 +3311,7 @@ const styles: Record<string, React.CSSProperties> = {
     flex: 1,
     minHeight: 0,
   },
+
   sidebar: {
     border: "1px solid #e6e6e6",
     borderRadius: 10,
@@ -3078,17 +3321,36 @@ const styles: Record<string, React.CSSProperties> = {
     minHeight: 320,
     overflow: "hidden",
   },
+
   sidebarHeader: {
     padding: "12px 14px",
     borderBottom: "1px solid #eee",
     fontWeight: 600,
     fontSize: 14,
+    display: "flex",
+    flexDirection: "column",
   },
+
+  scrollBody: {
+    flex: 1,
+    minHeight: 0,
+    overflowY: "auto",
+    paddingRight: 4,
+  },
+
+  grid: {
+    display: "grid",
+    gridTemplateColumns: "1fr 1fr",
+    gap: 12,
+    alignContent: "start",
+  },
+
   emptyState: {
     padding: 14,
     color: "#666",
     fontSize: 13,
   },
+
   annotationList: {
     display: "flex",
     flexDirection: "column",
@@ -3096,6 +3358,7 @@ const styles: Record<string, React.CSSProperties> = {
     padding: 10,
     overflowY: "auto",
   },
+
   annotationCard: {
     border: "1px solid #e5e7eb",
     borderRadius: 10,
@@ -3104,16 +3367,19 @@ const styles: Record<string, React.CSSProperties> = {
     gap: 8,
     background: "#fff",
   },
+
   annotationCardActive: {
     borderColor: "#ff3b30",
     boxShadow: "0 0 0 2px rgba(255,59,48,0.08)",
   },
+
   annotationCardTop: {
     display: "flex",
     justifyContent: "space-between",
     alignItems: "center",
     gap: 8,
   },
+
   annotationTitle: {
     fontWeight: 600,
     fontSize: 13,
@@ -3122,6 +3388,7 @@ const styles: Record<string, React.CSSProperties> = {
     textOverflow: "ellipsis",
     whiteSpace: "nowrap",
   },
+
   annotationType: {
     fontSize: 11,
     padding: "2px 6px",
@@ -3130,18 +3397,21 @@ const styles: Record<string, React.CSSProperties> = {
     color: "#374151",
     textTransform: "uppercase",
   },
+
   annotationMeta: {
     display: "grid",
     gap: 4,
     fontSize: 12,
     color: "#4b5563",
   },
+
   annotationActions: {
     display: "flex",
     justifyContent: "flex-end",
     gap: 8,
     flexWrap: "wrap",
   },
+
   group: { display: "flex", alignItems: "center", gap: 6 },
   divider: {
     width: 1,
@@ -3149,6 +3419,7 @@ const styles: Record<string, React.CSSProperties> = {
     background: "#eee",
     margin: "0 4px",
   },
+
   toolBtn: {
     width: 36,
     height: 36,
@@ -3159,24 +3430,66 @@ const styles: Record<string, React.CSSProperties> = {
     display: "grid",
     placeItems: "center",
   },
+
   toolBtnActive: {
     borderColor: "#ff3b30",
     background: "rgba(255,59,48,0.10)",
   },
+
   toolBtnDisabled: {
     opacity: 0.45,
     cursor: "not-allowed",
   },
+
   counter: {
     fontSize: 12,
     color: "#666",
     padding: "0 8px",
   },
+
+  sidebarHeaderTop: {
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 8,
+    marginBottom: 10,
+  },
+
+  filterGrid: {
+    display: "grid",
+    gridTemplateColumns: "1fr 1fr",
+    gap: 8,
+  },
+
+  filterSelect: {
+    width: "100%",
+    padding: "8px 10px",
+    borderRadius: 8,
+    border: "1px solid #d1d5db",
+    background: "#fff",
+    fontSize: 12,
+    color: "#111827",
+  },
+
+  filterResetBtn: {
+    padding: "6px 10px",
+    borderRadius: 8,
+    border: "1px solid #d1d5db",
+    background: "#fff",
+    fontSize: 12,
+    cursor: "pointer",
+  },
+
+  filterInfo: {
+    marginTop: 8,
+    fontSize: 12,
+    color: "#6b7280",
+  },
 };
 
 const modalStyles: Record<string, React.CSSProperties> = {
   backdrop: {
-    position: "absolute",
+    position: "fixed",
     inset: 0,
     background: "rgba(0,0,0,0.25)",
     display: "flex",
@@ -3211,12 +3524,17 @@ const modalStyles: Record<string, React.CSSProperties> = {
     background: "#fff",
   },
   modalLarge: {
-    width: "min(760px, 94vw)",
+    width: "min(980px, 96vw)",
+    height: "calc(100vh - 32px)",
+    maxHeight: "calc(100vh - 32px)",
     background: "#fff",
     borderRadius: 12,
     border: "1px solid #e6e6e6",
     boxShadow: "0 12px 30px rgba(0,0,0,0.18)",
     padding: 16,
+    display: "flex",
+    flexDirection: "column",
+    overflow: "hidden",
   },
   textarea: {
     width: "100%",
@@ -3254,6 +3572,21 @@ const formGridStyles: Record<string, React.CSSProperties> = {
     gap: 6,
   },
 };
+
+function IconMousePointer() {
+  return (
+    <svg width="18" height="18" viewBox="0 0 18 18" aria-hidden="true">
+      <path
+        d="M4 2.5v10.8l2.8-2 1.8 4.2 1.7-.7-1.8-4.2 3.5.1L4 2.5Z"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.4"
+        strokeLinejoin="round"
+        strokeLinecap="round"
+      />
+    </svg>
+  );
+}
 
 function IconCamera() {
   return (
