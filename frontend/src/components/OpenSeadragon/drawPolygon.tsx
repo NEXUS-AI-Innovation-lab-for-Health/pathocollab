@@ -39,6 +39,34 @@ function imagePointsToViewportPoints(
   return pts.map((p) => viewer.viewport.imageToViewportCoordinates(p.x, p.y));
 }
 
+function colorToSvgFill(color?: string): { fill: string; fillOpacity: string } {
+  if (!color) {
+    return { fill: "#ff3b30", fillOpacity: "0.18" };
+  }
+
+  if (color.startsWith("#")) {
+    return { fill: color, fillOpacity: "0.18" };
+  }
+
+  const match = color.match(
+    /rgba?\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)(?:\s*,\s*([0-9.]+))?\s*\)/i
+  );
+
+  if (!match) {
+    return { fill: color, fillOpacity: "0.18" };
+  }
+
+  const r = Number(match[1]);
+  const g = Number(match[2]);
+  const b = Number(match[3]);
+  const a = match[4] != null ? String(match[4]) : "1";
+
+  return {
+    fill: `rgb(${r},${g},${b})`,
+    fillOpacity: a,
+  };
+}
+
 function bboxOfImagePoints(pts: PolygonPoint[]): {
   x: number;
   y: number;
@@ -100,12 +128,15 @@ function createPolygonOverlaySvg(style?: {
   svg.style.overflow = "visible";
 
   const poly = document.createElementNS(svgNS, "polygon");
+  const { fill, fillOpacity } = colorToSvgFill(style?.fillColor);
+
   poly.setAttribute("vector-effect", "non-scaling-stroke");
   poly.setAttribute("stroke-width", String(style?.strokeWidth ?? 2));
   poly.setAttribute("stroke-linejoin", "round");
   poly.setAttribute("stroke-linecap", "round");
   poly.setAttribute("stroke", style?.strokeColor ?? "#ff3b30");
-  poly.setAttribute("fill", style?.fillColor ?? "rgba(255,59,48,0.18)");
+  poly.setAttribute("fill", fill);
+  poly.setAttribute("fill-opacity", fillOpacity);
 
   const preview = document.createElementNS(svgNS, "polyline");
   preview.setAttribute("vector-effect", "non-scaling-stroke");
@@ -151,6 +182,16 @@ function updateOverlay(
   } else {
     polygonState.previewEl.setAttribute("points", "");
     polygonState.previewEl.style.display = "none";
+  }
+
+  if (pts.length < 3) {
+    polygonState.polyEl.setAttribute("fill-opacity", "0");
+  } else {
+    const currentFill = polygonState.polyEl.getAttribute("fill-opacity");
+    if (!currentFill || currentFill === "0") {
+      const { fillOpacity } = colorToSvgFill();
+      polygonState.polyEl.setAttribute("fill-opacity", fillOpacity);
+    }
   }
 
   // l’overlay OSD doit être positionné avec un rect viewport

@@ -583,6 +583,17 @@ export default function OpenSeadragonUrlViewer(
     return ann;
   }
 
+  function polygonBounds(points: { x: number; y: number }[]) {
+    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+    for (const p of points) {
+      minX = Math.min(minX, p.x);
+      minY = Math.min(minY, p.y);
+      maxX = Math.max(maxX, p.x);
+      maxY = Math.max(maxY, p.y);
+    }
+    return { minX, minY, maxX, maxY, w: maxX - minX, h: maxY - minY };
+  }
+
   useEffect(() => {
     let cancelled = false;
 
@@ -666,16 +677,21 @@ export default function OpenSeadragonUrlViewer(
 
       const p = imagePointFromEvt(evt);
 
-      setAnnotations((prev) =>
-        prev.map((a) =>
+      setAnnotations((prev) => {
+        const next = prev.map((a) =>
           a.id === annId
             ? {
                 ...reshapeAnnotation(a, handleIndex, p.x, p.y),
                 updatedAt: new Date().toISOString(),
               }
             : a
-        )
-      );
+        );
+
+        const updatedAnn = next.find((a) => a.id === annId) || null;
+        setSelectedAnnotation(updatedAnn);
+
+        return next;
+      });
     };
 
     const onRelease = async () => {
@@ -779,27 +795,41 @@ export default function OpenSeadragonUrlViewer(
       const currentUser = getCurrentUser();
       const now = new Date().toISOString();
 
-      const aiAnnotations: Annotation[] = (data.annotations || []).map((ann: any, idx: number) => ({
-        id: `tmp-ia-${Date.now()}-${idx}`,
-        type: "polygon",
-        points: ann.points,
-        label: ann.label || `InstantSeg ${idx + 1}`,
-        severity: "Moyenne",
-        category: "Zone suspecte",
-        description: "Annotation générée automatiquement par InstantSeg",
-        recommendation: null,
-        tags: ["IA", "InstantSeg"],
-        ownerId: currentUser.id,
-        ownerName: "InstantSeg",
-        createdAt: now,
-        updatedAt: now,
-        _source: "ia",
-        strokeColor: "#7c3aed",
-        fillColor: "rgba(124,58,237,0.18)",
-        strokeWidth: 2,
-        confidence: ann.confidence ?? null,
-        notes: "Segmentation automatique",
-      }));
+      
+
+      const aiAnnotations: Annotation[] = (data.annotations || [])
+        .map((ann: any, idx: number) => ({
+          id: `tmp-ia-${Date.now()}-${idx}`,
+          type: "polygon",
+          points: (ann.points || []).map((p: any) => ({
+            x: Array.isArray(p) ? p[0] : p.x,
+            y: Array.isArray(p) ? p[1] : p.y,
+          })),
+          label:
+            typeof ann.label === "string" && ann.label.trim()
+              ? ann.label.trim()
+              : `InstantSeg ${idx + 1}`,
+          severity: "Moyenne",
+          category: "Zone suspecte",
+          description: "Annotation générée automatiquement par InstantSeg",
+          recommendation: null,
+          tags: ["IA", "InstantSeg"],
+          ownerId: currentUser.id,
+          ownerName: "InstantSeg",
+          createdAt: now,
+          updatedAt: now,
+          _source: "ia",
+          strokeColor: "#7c3aed",
+          fillColor: "rgba(124,58,237,0.12)",
+          strokeWidth: 2,
+          confidence:
+            ann.confidence != null ? String(ann.confidence) : null,
+          notes: "Segmentation automatique",
+        }))
+        .filter((ann) => {
+          const b = polygonBounds(ann.points);
+          return b.w >= 20 && b.h >= 20;
+        });
 
       setAnnotations((prev) => {
         const next = [...prev, ...aiAnnotations];
@@ -1101,6 +1131,70 @@ export default function OpenSeadragonUrlViewer(
     return { ...base, type: "polygon", points: coords.points };
   }
 
+  const deleteSelectedAnnotation = async () => {
+    if (!selectedAnnotation || !imageKey) return;
+
+    const annToDelete = selectedAnnotation;
+
+    setAnnotations((prev) => {
+      const next = prev.filter((a) => a.id !== annToDelete.id);
+      saveAnnotations(imageKey, next);
+      return next;
+    });
+
+    closeDetailModal();
+
+    try {
+      if (!String(annToDelete.id).startsWith("tmp-")) {
+        await deleteAnnotationFromApi(annToDelete.id);
+      }
+    } catch (e) {
+      console.error("Erreur suppression annotation:", e);
+
+      setAnnotations((prev) => {
+        const exists = prev.some((a) => a.id === annToDelete.id);
+        if (exists) return prev;
+        const next = [...prev, annToDelete];
+        saveAnnotations(imageKey, next);
+        return next;
+      });
+
+      alert("La suppression de l’annotation a échoué côté serveur.");
+    }
+  };
+
+  const deleteAnnotationFromList = async (ann: Annotation) => {
+    if (!imageKey) return;
+    if (!canEditAnnotation(ann)) return;
+
+    const previous = [...annotationsRef.current];
+
+    setAnnotations((prev) => {
+      const next = prev.filter((a) => a.id !== ann.id);
+      saveAnnotations(imageKey, next);
+      return next;
+    });
+
+    if (selectedAnnotation?.id === ann.id) {
+      setSelectedAnnotation(null);
+    }
+
+    if (detailOpenRef.current && selectedAnnotation?.id === ann.id) {
+      closeDetailModal();
+    }
+
+    try {
+      if (!String(ann.id).startsWith("tmp-")) {
+        await deleteAnnotationFromApi(ann.id);
+      }
+    } catch (e) {
+      console.error("Erreur suppression annotation depuis liste:", e);
+      setAnnotations(previous);
+      saveAnnotations(imageKey, previous);
+      alert("La suppression de l’annotation a échoué côté serveur.");
+    }
+  };
+
   useEffect(() => {
     let cancelled = false;
 
@@ -1169,7 +1263,10 @@ export default function OpenSeadragonUrlViewer(
     if (!viewer) return;
 
     const draw = () => {
-      redrawAll(viewer, [...annotations, ...draftAnnotations]);
+      redrawAll(viewer, [...annotations, ...draftAnnotations], {
+        reshapeMode,
+        selectedId: selectedAnnotation?.id ?? null,
+      });
     };
 
     if (viewer.world && viewer.world.getItemCount() > 0) {
@@ -1185,7 +1282,7 @@ export default function OpenSeadragonUrlViewer(
         // ignore
       }
     };
-  }, [annotations, draftAnnotations, sourceUrl]);
+  }, [annotations, draftAnnotations, sourceUrl, reshapeMode, selectedAnnotation]);
 
   useEffect(() => {
     const viewer = viewerRef.current;
@@ -1752,11 +1849,26 @@ export default function OpenSeadragonUrlViewer(
     setCapturePreviewUrl(null);
   };
 
-  const onClear = () => {
+  const onClear = async () => {
     if (!imageKey) return;
+    if (annotations.length === 0) return;
+
+    const toDelete = [...annotations];
+
     setAnnotations([]);
     saveAnnotations(imageKey, []);
     setSelectedAnnotation(null);
+
+    try {
+      await deleteAnnotationsFromApi(toDelete.map((a) => a.id));
+    } catch (e) {
+      console.error("Erreur suppression annotations API:", e);
+
+      // rollback si l’API échoue
+      setAnnotations(toDelete);
+      saveAnnotations(imageKey, toDelete);
+      alert("La suppression des annotations a échoué côté serveur.");
+    }
   };
 
   function getToken() {
@@ -1818,6 +1930,27 @@ export default function OpenSeadragonUrlViewer(
     }
 
     return await res.json();
+  }
+
+  async function deleteAnnotationFromApi(annotationId: string) {
+    const res = await fetch(`${IMAGES_API}/api/annotations/${annotationId}`, {
+      method: "DELETE",
+      headers: {
+        ...authHeaders(),
+      },
+    });
+
+    if (!res.ok) {
+      const text = await res.text().catch(() => "");
+      throw new Error(`DELETE annotation failed: ${res.status} - ${text}`);
+    }
+  }
+
+  async function deleteAnnotationsFromApi(annotationIds: string[]) {
+    for (const id of annotationIds) {
+      if (!id || String(id).startsWith("tmp-")) continue;
+      await deleteAnnotationFromApi(id);
+    }
   }
 
   function buildCoordinatesPayload(ann: Annotation): Record<string, any> {
@@ -2194,12 +2327,14 @@ export default function OpenSeadragonUrlViewer(
                 const owner = ann.ownerName || ann.ownerId || "Inconnu";
                 const title =
                   ann.label?.trim() ||
-                  `${ann.type === "rect"
-                    ? "Rectangle"
-                    : ann.type === "circle"
-                      ? "Cercle"
-                      : "Polygone"
-                  } sans label`;
+                  (ann._source === "ia"
+                    ? "Segmentation InstantSeg"
+                    : `${ann.type === "rect"
+                        ? "Rectangle"
+                        : ann.type === "circle"
+                          ? "Cercle"
+                          : "Polygone"
+                      } sans label`);
 
                 return (
                   <div
@@ -2239,6 +2374,22 @@ export default function OpenSeadragonUrlViewer(
                       >
                         View
                       </button>
+
+                      {canEditAnnotation(ann) && (
+                        <button
+                          type="button"
+                          style={{
+                            ...modalStyles.secondaryBtn,
+                            border: "1px solid #dc2626",
+                            color: "#dc2626",
+                          }}
+                          onClick={() => {
+                            void deleteAnnotationFromList(ann);
+                          }}
+                        >
+                          Supprimer
+                        </button>
+                      )}
                     </div>
                   </div>
                 );
@@ -2269,18 +2420,21 @@ export default function OpenSeadragonUrlViewer(
 
               <div style={{ display: "flex", gap: 8 }}>
                 {selectedAnnotation &&
-                  canEditAnnotation(selectedAnnotation) &&
-                  formMode === "view" && (
-                    <button
-                      onClick={() => setFormMode("edit")}
-                      style={modalStyles.secondaryBtn}
-                    >
-                      Modifier
-                    </button>
-                  )}
-                <button onClick={closeDetailModal} style={modalStyles.secondaryBtn}>
-                  Fermer
-                </button>
+                canEditAnnotation(selectedAnnotation) &&
+                formMode !== "create" && (
+                  <button
+                    onClick={() => {
+                      void deleteSelectedAnnotation();
+                    }}
+                    style={{
+                      ...modalStyles.secondaryBtn,
+                      border: "1px solid #dc2626",
+                      color: "#dc2626",
+                    }}
+                  >
+                    Supprimer
+                  </button>
+                )}
               </div>
             </div>
 
@@ -2613,6 +2767,12 @@ function redrawAll(
   const overlays = ((viewer as any).currentOverlays ?? []) as Array<{
     element?: HTMLElement;
   }>;
+  
+  const shouldShowHandles = (ann: Annotation) => {
+    if (!options?.reshapeMode) return false;
+    if (options?.selectedId) return ann.id === options.selectedId;
+    return true;
+  };
 
   overlays.forEach((o) => {
     const el = o?.element;
@@ -2642,6 +2802,15 @@ function redrawAll(
         location: imageRectToViewportRect(viewer, ann),
       });
 
+      if (shouldShowHandles(ann)) {
+        addResizeHandles(viewer, ann, [
+          { annotationId: ann.id, index: 0, x: ann.x, y: ann.y },
+          { annotationId: ann.id, index: 1, x: ann.x + ann.w, y: ann.y },
+          { annotationId: ann.id, index: 2, x: ann.x + ann.w, y: ann.y + ann.h },
+          { annotationId: ann.id, index: 3, x: ann.x, y: ann.y + ann.h },
+        ]);
+      }
+
       if (ann.label) addLabel(viewer, ann, ann.label, "rect");
       return;
     }
@@ -2659,6 +2828,15 @@ function redrawAll(
         element: el,
         location: imageEllipseToViewportRect(viewer, ann),
       });
+
+      if (shouldShowHandles(ann)) {
+        addResizeHandles(viewer, ann, [
+          { annotationId: ann.id, index: 0, x: ann.cx - ann.rx, y: ann.cy },
+          { annotationId: ann.id, index: 1, x: ann.cx + ann.rx, y: ann.cy },
+          { annotationId: ann.id, index: 2, x: ann.cx, y: ann.cy - ann.ry },
+          { annotationId: ann.id, index: 3, x: ann.cx, y: ann.cy + ann.ry },
+        ]);
+      }
 
       if (ann.label) addLabel(viewer, ann, ann.label, "circle");
       return;
@@ -2701,14 +2879,33 @@ function redrawAll(
       (svg as any).dataset.kind = "persisted";
 
       const poly = document.createElementNS(svgNS, "polygon");
-      poly.setAttribute("fill", "rgba(255,0,0,0.30)");
-      poly.setAttribute("fill", ann.fillColor ?? "rgba(255,59,48,0.18)");
+      const fillInfo = (() => {
+        const color = ann.fillColor ?? "rgba(255,59,48,0.18)";
+        if (color.startsWith("#")) {
+          return { fill: color, fillOpacity: "0.18" };
+        }
+
+        const match = color.match(
+          /rgba?\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)(?:\s*,\s*([0-9.]+))?\s*\)/i
+        );
+
+        if (!match) {
+          return { fill: color, fillOpacity: "0.18" };
+        }
+
+        return {
+          fill: `rgb(${match[1]},${match[2]},${match[3]})`,
+          fillOpacity: match[4] ?? "1",
+        };
+      })();
+
+      poly.setAttribute("fill", fillInfo.fill);
+      poly.setAttribute("fill-opacity", fillInfo.fillOpacity);
       poly.setAttribute("stroke", ann.strokeColor ?? "#ff3b30");
-      poly.setAttribute(
-        "stroke-width",
-        String(Math.max(0.0006, (ann.strokeWidth ?? 2) * 0.0006)),
-      );
+      poly.setAttribute("stroke-width", String(ann.strokeWidth ?? 2));
+      poly.setAttribute("vector-effect", "non-scaling-stroke");
       poly.setAttribute("stroke-linejoin", "round");
+      poly.setAttribute("stroke-linecap", "round");
       poly.setAttribute(
         "points",
         vpts.map((p) => `${p.x},${p.y}`).join(" "),
@@ -2736,6 +2933,19 @@ function redrawAll(
       });
 
       viewer.addOverlay({ element: svg, location: rect });
+
+      if (shouldShowHandles(ann)) {
+        addResizeHandles(
+          viewer,
+          ann,
+          ann.points.map((p, idx) => ({
+            annotationId: ann.id,
+            index: idx,
+            x: p.x,
+            y: p.y,
+          }))
+        );
+      }
 
       if (ann.label) {
         addLabel(
@@ -2782,6 +2992,38 @@ function addLabel(
   viewer.addOverlay({
     element: el,
     location: viewer.viewport.imageToViewportCoordinates(x, y),
+  });
+}
+
+function addResizeHandles(
+  viewer: OpenSeadragon.Viewer,
+  ann: Annotation,
+  handles: ShapeHandle[]
+) {
+  handles.forEach((h) => {
+    const size = ann.type === "polygon" ? 14 : 12;
+
+    const el = document.createElement("div");
+    el.style.width = `${size}px`;
+    el.style.height = `${size}px`;
+    el.style.borderRadius = "9999px";
+    el.style.background = "#ffffff";
+    el.style.border = "2px solid #2563eb";
+    el.style.boxShadow = "0 0 0 2px rgba(255,255,255,0.85)";
+    el.style.pointerEvents = "none";
+    el.dataset.kind = "persisted";
+
+    const half = size / 2;
+
+    viewer.addOverlay({
+      element: el,
+      location: imageRectToViewportRect(viewer, {
+        x: h.x - half,
+        y: h.y - half,
+        w: size,
+        h: size,
+      }),
+    });
   });
 }
 
@@ -2897,6 +3139,8 @@ const styles: Record<string, React.CSSProperties> = {
   annotationActions: {
     display: "flex",
     justifyContent: "flex-end",
+    gap: 8,
+    flexWrap: "wrap",
   },
   group: { display: "flex", alignItems: "center", gap: 6 },
   divider: {

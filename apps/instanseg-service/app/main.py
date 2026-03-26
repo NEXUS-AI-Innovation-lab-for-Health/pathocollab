@@ -1,12 +1,10 @@
 from io import BytesIO
-from typing import List, Dict, Any
+from typing import Optional
 
 import numpy as np
 from PIL import Image
 from fastapi import FastAPI, UploadFile, File, Form, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-
-from instanseg import InstanSeg
 from skimage import measure
 
 app = FastAPI(title="InstantSeg Service")
@@ -19,8 +17,34 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Chargé une seule fois au démarrage
-MODEL = InstanSeg("brightfield_nuclei", verbosity=1)
+MODEL: Optional[object] = None
+MODEL_LOAD_ERROR: Optional[str] = None
+
+
+def load_model():
+    global MODEL, MODEL_LOAD_ERROR
+    if MODEL is not None:
+        return MODEL
+    if MODEL_LOAD_ERROR is not None:
+        raise RuntimeError(MODEL_LOAD_ERROR)
+
+    try:
+        from instanseg import InstanSeg
+        MODEL = InstanSeg("brightfield_nuclei", verbosity=1)
+        print("✅ InstantSeg model loaded")
+        return MODEL
+    except Exception as e:
+        MODEL_LOAD_ERROR = f"{type(e).__name__}: {e}"
+        print(f"❌ InstantSeg load failed: {MODEL_LOAD_ERROR}")
+        raise
+
+
+@app.on_event("startup")
+async def startup_event():
+    try:
+        load_model()
+    except Exception:
+        pass
 
 def mask_to_polygons(label_mask: np.ndarray, offset_x: float = 0, offset_y: float = 0):
     polygons = []
@@ -63,13 +87,13 @@ async def segment_region(
     offset_y: float = Form(...),
 ):
     try:
+        model = load_model()
+
         content = await image.read()
         pil = Image.open(BytesIO(content)).convert("RGB")
         arr = np.array(pil)
 
-        # InstanSeg peut travailler sur tableau numpy
-        # pixel_size=None ici pour un POC, à affiner ensuite si tu veux de la calibration
-        labeled_output, _ = MODEL.eval_small_image(arr, pixel_size=None)
+        labeled_output, _ = model.eval_small_image(arr, pixel_size=None)
 
         if labeled_output is None:
             return {"annotations": []}
@@ -79,7 +103,6 @@ async def segment_region(
 
         labeled_output = np.asarray(labeled_output)
 
-        # Si sortie avec dimensions supplémentaires
         while labeled_output.ndim > 2:
             labeled_output = labeled_output[0]
 
@@ -92,4 +115,4 @@ async def segment_region(
         return {"annotations": polygons}
 
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=f"{type(e).__name__}: {e}")
