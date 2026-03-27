@@ -82,14 +82,22 @@ class NotificationService:
                 "success": False,
                 "message": "Notification not found",
                 "notification_id": notification_id,
+                "unread_count": 0,
             }
 
-        notification.is_read = True
-        await db.commit()
-        await db.refresh(notification)
+        # idempotent : si déjà lu, on ne redécrémente pas côté logique
+        if not notification.is_read:
+            notification.is_read = True
+            await db.commit()
+            await db.refresh(notification)
+
+        unread_count = await NotificationService.count_unread_notifications(
+            db, notification.user_id
+        )
 
         return {
             "success": True,
             "message": "Notification marked as read",
             "notification_id": notification_id,
+            "unread_count": unread_count,
         }

@@ -1,7 +1,8 @@
-fastapi
-uvicorn[standard]
-python-multipart
-pillow
-numpy
-scikit-image
-instanseg-torch
+fastapi==0.115.12
+uvicorn[standard]==0.34.0
+python-multipart==0.0.20
+pillow==11.1.0
+numpy==1.26.4
+scikit-image==0.22.0
+requests==2.32.3
+instanseg-torch==0.1.1

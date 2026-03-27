@@ -1,6 +1,11 @@
 from fastapi import APIRouter, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
-from app.models.notification import Notification, NotificationListResponse
+
+from app.models.notification import (
+    Notification,
+    NotificationListResponse,
+    NotificationReadResponse,
+)
 from app.services.notification_service import NotificationService
 from app.utils.database import get_db
 
@@ -32,6 +37,11 @@ async def get_user_notifications(user_id: str, db: AsyncSession = Depends(get_db
     )
 
 
-@router.post("/{notification_id}/read")
+@router.patch("/{notification_id}/read", response_model=NotificationReadResponse)
 async def mark_notification_as_read(notification_id: str, db: AsyncSession = Depends(get_db)):
+    return await NotificationService.mark_as_read(db, notification_id)
+
+
+@router.post("/{notification_id}/read", response_model=NotificationReadResponse)
+async def mark_notification_as_read_post(notification_id: str, db: AsyncSession = Depends(get_db)):
     return await NotificationService.mark_as_read(db, notification_id)

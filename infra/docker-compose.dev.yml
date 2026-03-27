@@ -201,6 +201,9 @@ services:
     ports:
       - "8010:8010"
     restart: unless-stopped
+    environment:
+      IMAGES_INTERNAL_HOST: images-service
+      IMAGES_INTERNAL_PORT: "8004"
 
   backend-gateway:
     build:

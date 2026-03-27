@@ -48,7 +48,7 @@ const IMAGES_API =
 const OLGA_API =
   process.env.REACT_APP_OLGA_API?.trim() || "http://localhost:9091";
 
-  const INSTANSEG_API =
+const INSTANSEG_API =
   process.env.REACT_APP_INSTANSEG_API?.trim() ||
   `${window.location.protocol}//${window.location.hostname}:8010`;
 
@@ -237,7 +237,10 @@ export default function OpenSeadragonUrlViewer(
     overlayEl: null,
   });
 
-  const canAnnotate = useMemo(() => Boolean(imageKey), [imageKey]);
+  const canAnnotate = useMemo(() => {
+    const role = getCurrentUserRole();
+    return Boolean(imageKey) && role !== "medecin_generaliste" && role !== "admin";
+  }, [imageKey]);
 
   function getCurrentUser() {
     const token =
@@ -256,6 +259,22 @@ export default function OpenSeadragonUrlViewer(
       return { id: email, name };
     } catch {
       return { id: null, name: null };
+    }
+  }
+
+  function getCurrentUserRole() {
+    const token =
+      localStorage.getItem("access_token") ||
+      localStorage.getItem("token") ||
+      localStorage.getItem("accessToken");
+
+    if (!token) return null;
+
+    try {
+      const payload = JSON.parse(atob(token.split(".")[1]));
+      return payload.role || null;
+    } catch {
+      return null;
     }
   }
 
@@ -809,17 +828,19 @@ export default function OpenSeadragonUrlViewer(
       const topLeftImg = viewer.viewport.viewportToImageCoordinates(topLeftVp);
       const bottomRightImg = viewer.viewport.viewportToImageCoordinates(bottomRightVp);
 
-      const offsetX = Math.min(topLeftImg.x, bottomRightImg.x);
-      const offsetY = Math.min(topLeftImg.y, bottomRightImg.y);
-
-      const blob = await exportCaptureBlobFromSelection(rectPx);
+      const x = Math.round(Math.min(topLeftImg.x, bottomRightImg.x));
+      const y = Math.round(Math.min(topLeftImg.y, bottomRightImg.y));
+      const w = Math.max(1, Math.round(Math.abs(bottomRightImg.x - topLeftImg.x)));
+      const h = Math.max(1, Math.round(Math.abs(bottomRightImg.y - topLeftImg.y)));
 
       const formData = new FormData();
-      formData.append("image", blob, "instanseg-crop.png");
-      formData.append("offset_x", String(offsetX));
-      formData.append("offset_y", String(offsetY));
+      formData.append("source_url", sourceUrl);
+      formData.append("x", String(x));
+      formData.append("y", String(y));
+      formData.append("w", String(w));
+      formData.append("h", String(h));
 
-      const res = await fetch(`${INSTANSEG_API}/api/instanseg/segment`, {
+      const res = await fetch(`${INSTANSEG_API}/api/instanseg/segment-from-dzi`, {
         method: "POST",
         headers: {
           ...authHeaders(),
@@ -862,8 +883,7 @@ export default function OpenSeadragonUrlViewer(
           strokeColor: "#7c3aed",
           fillColor: "rgba(124,58,237,0.12)",
           strokeWidth: 2,
-          confidence:
-            ann.confidence != null ? String(ann.confidence) : null,
+          confidence: ann.confidence != null ? String(ann.confidence) : null,
           notes: "Segmentation automatique",
         }))
         .filter((ann) => {
@@ -878,7 +898,6 @@ export default function OpenSeadragonUrlViewer(
       });
 
       await persistAiAnnotations(aiAnnotations);
-
       finishTransientActionAndReturnToFreePan();
     } catch (e: any) {
       console.error("InstantSeg error:", e);

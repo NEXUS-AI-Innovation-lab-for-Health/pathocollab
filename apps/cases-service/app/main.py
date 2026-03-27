@@ -1,6 +1,6 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from app.routes import patients, cases
+from app.routes import patients, cases, discussions
 import os
 from dotenv import load_dotenv
 import logging
@@ -21,7 +21,12 @@ app = FastAPI(
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000", "http://127.0.0.1:3000", "http://10.10.69.63:3000", "http://192.168.1.21:3000"],
+    allow_origins=[
+        "http://localhost:3000",
+        "http://127.0.0.1:3000",
+        "http://10.10.69.63:3000",
+        "http://192.168.1.21:3000"
+    ],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -29,6 +34,7 @@ app.add_middleware(
 
 app.include_router(patients.router, prefix="/api")
 app.include_router(cases.router, prefix="/api")
+app.include_router(discussions.router, prefix="/api")
 
 @app.get("/health")
 def health_check():

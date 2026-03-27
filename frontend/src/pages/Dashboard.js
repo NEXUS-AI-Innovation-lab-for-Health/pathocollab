@@ -48,11 +48,11 @@ const Dashboard = () => {
   const getCurrentUserRole = () => {
     const token = localStorage.getItem("access_token");
     if (!token) {
-      console.log("Aucun token trouvé pour IsAdmin");
+      console.log("Aucun token trouvé pour canCreateCase");
       return null;
     }
 
-    console.log("Token trouvé pour IsAdmin:");
+    console.log("Token trouvé pour canCreateCase:");
 
     try {
       const payload = JSON.parse(atob(token.split(".")[1]));
@@ -60,12 +60,15 @@ const Dashboard = () => {
       console.log("Payload du token:", payload.role);
       return payload.role || null;
     } catch (e) {
-      console.error("Erreur lors du décodage du token pour IsAdmin:", e);
+      console.error("Erreur lors du décodage du token pour canCreateCase:", e);
       return null;
     }
   };
 
-  const isAdmin = () => getCurrentUserRole() === "admin";
+  const canCreateCase = () => {
+    const role = getCurrentUserRole();
+    return role === "admin" || role === "medecin_generaliste";
+  };
 
   const statusOptions = [
     "Tous les statuts",
@@ -91,7 +94,6 @@ const Dashboard = () => {
     try {
       const token = localStorage.getItem("access_token");
       if (!token) {
-        console.log("Aucun token trouvé");
         setNotifications([]);
         setUnreadCount(0);
         return;
@@ -99,9 +101,6 @@ const Dashboard = () => {
 
       const tokenData = JSON.parse(atob(token.split(".")[1]));
       const email = tokenData.sub || tokenData.email || "";
-
-      console.log("Token décodé:", tokenData);
-      console.log("Email extrait:", email);
 
       const response = await axios.get(
         `${WORKFLOW_API}/api/notifications/user/${email}`,
@@ -112,15 +111,9 @@ const Dashboard = () => {
         },
       );
 
-      console.log("Notifications reçues:", response.data);
-
-      const notificationsData = Array.isArray(response.data)
-        ? response.data
-        : Array.isArray(response.data?.items)
-          ? response.data.items
-          : Array.isArray(response.data?.notifications)
-            ? response.data.notifications
-            : [];
+      const notificationsData = Array.isArray(response.data?.items)
+        ? response.data.items
+        : [];
 
       setNotifications(notificationsData);
       setUnreadCount(
@@ -137,7 +130,14 @@ const Dashboard = () => {
 
   const markAsRead = async (notificationId) => {
     try {
-      await axios.patch(
+      const target = notifications.find((n) => n.id === notificationId);
+
+      // si déjà lue, ne rien faire
+      if (!target || target.is_read) {
+        return true;
+      }
+
+      const response = await axios.patch(
         `${WORKFLOW_API}/api/notifications/${notificationId}/read`,
         {},
         {
@@ -147,16 +147,34 @@ const Dashboard = () => {
         },
       );
 
-      // Mettre à jour l'état local
       setNotifications((prev) =>
         prev.map((n) =>
           n.id === notificationId ? { ...n, is_read: true } : n,
         ),
       );
-      setUnreadCount((prev) => Math.max(0, prev - 1));
+
+      if (typeof response.data?.unread_count === "number") {
+        setUnreadCount(response.data.unread_count);
+      } else {
+        setUnreadCount((prev) => Math.max(0, prev - 1));
+      }
+
+      return true;
     } catch (error) {
       console.error("Erreur lors du marquage comme lu:", error);
+      return false;
     }
+  };
+
+  const handleNotificationClick = async (notification) => {
+    if (!notification) return;
+
+    if (!notification.is_read) {
+      await markAsRead(notification.id);
+    }
+
+    setShowNotifications(false);
+    navigate(`/cases/${notification.case_id}`);
   };
 
   // Rafraîchir les cas quand le composant redevient visible (après navigation)
@@ -385,18 +403,19 @@ const Dashboard = () => {
                     )}
                   </Button>
                 </DropdownMenuTrigger>
-                <DropdownMenuContent align="end" className="w-80">
+                <DropdownMenuContent align="end" className="w-96">
                   <div className="p-2">
                     <h3 className="font-semibold text-sm mb-2">
                       Notifications
                     </h3>
+
                     {!Array.isArray(notifications) || notifications.length === 0 ? (
                       <p className="text-sm text-gray-500 p-2">
                         Aucune notification
                       </p>
                     ) : (
-                      <div className="max-h-64 overflow-y-auto">
-                        {(Array.isArray(notifications) ? notifications : []).map((notification) => (
+                      <div className="max-h-80 overflow-y-auto">
+                        {notifications.map((notification) => (
                           <div
                             key={notification.id}
                             className={`p-3 rounded-lg mb-2 cursor-pointer transition-colors ${
@@ -404,14 +423,10 @@ const Dashboard = () => {
                                 ? "bg-gray-50 hover:bg-gray-100"
                                 : "bg-blue-50 hover:bg-blue-100 border-l-4 border-blue-500"
                             }`}
-                            onClick={() => {
-                              markAsRead(notification.id);
-                              navigate(`/cases/${notification.case_id}`);
-                              setShowNotifications(false);
-                            }}
+                            onClick={() => handleNotificationClick(notification)}
                           >
-                            <div className="flex items-start justify-between">
-                              <div className="flex-1">
+                            <div className="flex items-start justify-between gap-3">
+                              <div className="flex-1 min-w-0">
                                 <p className="font-medium text-sm">
                                   {notification.title}
                                 </p>
@@ -419,14 +434,28 @@ const Dashboard = () => {
                                   {notification.message}
                                 </p>
                                 <p className="text-xs text-gray-400 mt-2">
-                                  {new Date(
-                                    notification.created_at,
-                                  ).toLocaleString("fr-FR")}
+                                  {new Date(notification.created_at).toLocaleString("fr-FR")}
                                 </p>
                               </div>
-                              {!notification.is_read && (
-                                <div className="w-2 h-2 bg-blue-500 rounded-full mt-1"></div>
-                              )}
+
+                              <div className="flex flex-col items-end gap-2 shrink-0">
+                                {!notification.is_read && (
+                                  <>
+                                    <div className="w-2 h-2 bg-blue-500 rounded-full mt-1"></div>
+                                    <Button
+                                      variant="outline"
+                                      size="sm"
+                                      className="h-7 px-2 text-xs"
+                                      onClick={async (e) => {
+                                        e.stopPropagation();
+                                        await markAsRead(notification.id);
+                                      }}
+                                    >
+                                      Lu
+                                    </Button>
+                                  </>
+                                )}
+                              </div>
                             </div>
                           </div>
                         ))}
@@ -582,7 +611,7 @@ const Dashboard = () => {
                   Liste de tous vos cas en cours et terminés
                 </CardDescription>
               </div>
-              {isAdmin() && (
+              {canCreateCase() && (
                 <Button
                   onClick={() => navigate("/cases/new")}
                   data-testid="new-case-button"
@@ -642,7 +671,7 @@ const Dashboard = () => {
                             >
                               Voir
                             </Button>
-                            {isAdmin() && (
+                            {canCreateCase() && (
                               <Button
                                 variant="outline"
                                 size="sm"

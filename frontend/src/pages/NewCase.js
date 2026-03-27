@@ -349,8 +349,8 @@ const NewCase = () => {
         status: "pending",
         created_by: userName,
         assigned_specialists: selectedSpecialists.map((s) => s.email),
+        assigned_generalists: selectedGeneralists.map((s) => s.email),
       };
-
       const response = await axios.post(
         `${CASES_API}/api/cases/create/`,
         caseData,
@@ -364,7 +364,7 @@ const NewCase = () => {
 
       const workflowData = {
         case_id: response.data.id,
-        specialists_order: selectedSpecialists.map((s) => s.email),
+        specialists_order: selectedWorkflowSpecialists.map((s) => s.email),
       };
 
       await axios.post(`${WORKFLOW_API}/api/workflows/`, workflowData, {

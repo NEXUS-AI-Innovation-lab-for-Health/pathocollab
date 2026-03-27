@@ -26,16 +26,16 @@ class NotificationDB(Base):
     id: Mapped[str] = mapped_column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
     user_id: Mapped[str] = mapped_column(String, nullable=False, index=True)
     case_id: Mapped[str] = mapped_column(String, nullable=False, index=True)
-    
+
     notification_type = mapped_column(
         SQLEnum(
             NotificationType,
             name="notification_type",
             create_type=False,
-            values_callable=lambda enum_cls: [e.value for e in enum_cls]
+            values_callable=lambda enum_cls: [e.value for e in enum_cls],
         ),
-        nullable=False
-    )    
+        nullable=False,
+    )
 
     title: Mapped[str] = mapped_column(String, nullable=False)
     message: Mapped[str] = mapped_column(Text, nullable=False)
@@ -66,9 +66,13 @@ class Notification(NotificationBase):
 
 
 class NotificationReadResponse(BaseModel):
+    success: bool
     message: str
+    notification_id: str
+    unread_count: int
 
 
 class NotificationListResponse(BaseModel):
     items: list[Notification]
     total: Optional[int] = None
+    unread_count: int = 0

@@ -83,6 +83,11 @@ const CaseDetail = () => {
   const [wsiLoading, setWsiLoading] = useState(false);
   const [wsiError, setWsiError] = useState(null);
 
+  const [discussionMessages, setDiscussionMessages] = useState([]);
+  const [discussionLoading, setDiscussionLoading] = useState(false);
+  const [discussionInput, setDiscussionInput] = useState("");
+  const [sendingDiscussion, setSendingDiscussion] = useState(false);
+
   const getAuthHeaders = useCallback(() => {
     const token = localStorage.getItem("access_token");
     return token ? { Authorization: `Bearer ${token}` } : {};
@@ -254,6 +259,47 @@ const CaseDetail = () => {
     [getAuthHeaders]
   );
 
+  const fetchDiscussionMessages = useCallback(async () => {
+    try {
+      setDiscussionLoading(true);
+
+      const response = await axios.get(
+        `${CASES_API}/api/discussions/case/${caseId}`,
+        { headers: getAuthHeaders() }
+      );
+
+      setDiscussionMessages(response.data || []);
+    } catch (error) {
+      console.error("Error fetching discussion messages:", error);
+      setDiscussionMessages([]);
+    } finally {
+      setDiscussionLoading(false);
+    }
+  }, [caseId, getAuthHeaders]);
+
+  const handleSendDiscussionMessage = async () => {
+    const content = discussionInput.trim();
+    if (!content) return;
+
+    try {
+      setSendingDiscussion(true);
+
+      const response = await axios.post(
+        `${CASES_API}/api/discussions/case/${caseId}`,
+        { content },
+        { headers: getAuthHeaders() }
+      );
+
+      setDiscussionMessages((prev) => [...prev, response.data]);
+      setDiscussionInput("");
+    } catch (error) {
+      console.error("Error sending discussion message:", error);
+      toast.error("Erreur lors de l'envoi du message");
+    } finally {
+      setSendingDiscussion(false);
+    }
+  };
+
   useEffect(() => {
     fetchCaseDetails();
     fetchReports();
@@ -265,6 +311,10 @@ const CaseDetail = () => {
     fetchRadiologySeries(patient.id);
   }, [patient?.id, fetchWsis, fetchRadiologySeries]);
 
+  useEffect(() => {
+    fetchDiscussionMessages();
+  }, [fetchDiscussionMessages]);
+  
   const viewerSource = useMemo(() => {
     if (!patient?.id || !selectedWsi?.wsi_id) return null;
 
@@ -277,12 +327,25 @@ const CaseDetail = () => {
     };
   }, [patient?.id, selectedWsi?.wsi_id]);
 
+  const getCurrentUserRole = useCallback(() => {
+    const token = localStorage.getItem("access_token");
+    if (!token) return null;
+    try {
+      const payload = JSON.parse(atob(token.split(".")[1]));
+      return payload.role || null;
+    } catch {
+      return null;
+    }
+  }, []);
+
   const canCreateReport = () => {
     if (!workflow || !workflow.specialists_order) return false;
 
-    const currentUserId = getCurrentUserId();
+    const currentUserRole = getCurrentUserRole();
+    if (currentUserRole === "medecin_generaliste") return false;
     if (isAdmin()) return false;
 
+    const currentUserId = getCurrentUserId();
     const isSpecialist = workflow.specialists_order.includes(currentUserId);
     const isCurrentSpecialist =
       workflow.specialists_order[workflow.current_step] === currentUserId;
@@ -292,6 +355,8 @@ const CaseDetail = () => {
 
   const canEditReport = (reportUserId) => {
     const currentUserId = getCurrentUserId();
+    const currentUserRole = getCurrentUserRole();
+    if (currentUserRole === "medecin_generaliste") return false;
     if (isAdmin()) return false;
     return currentUserId === reportUserId;
   };
@@ -1079,10 +1144,80 @@ const CaseDetail = () => {
 
           <TabsContent value="discussion">
             <Card>
+              <CardHeader>
+                <CardTitle>Discussion du cas</CardTitle>
+              </CardHeader>
+
               <CardContent className="pt-6">
-                <p className="text-center text-slate-500 py-8">
-                  Chat collaboratif entre spécialistes (à implémenter)
-                </p>
+                <div className="flex flex-col gap-4">
+                  <div className="border border-slate-200 rounded-lg bg-slate-50 p-4 h-[50vh] overflow-y-auto">
+                    {discussionLoading ? (
+                      <p className="text-center text-slate-500">Chargement des messages...</p>
+                    ) : discussionMessages.length === 0 ? (
+                      <p className="text-center text-slate-500">
+                        Aucun message pour le moment
+                      </p>
+                    ) : (
+                      <div className="space-y-3">
+                        {discussionMessages.map((message) => {
+                          const isMine = message.user_id === getCurrentUserId();
+
+                          return (
+                            <div
+                              key={message.id}
+                              className={`flex ${isMine ? "justify-end" : "justify-start"}`}
+                            >
+                              <div
+                                className={`max-w-[75%] rounded-lg px-4 py-3 shadow-sm ${
+                                  isMine
+                                    ? "bg-blue-600 text-white"
+                                    : "bg-white border border-slate-200 text-slate-900"
+                                }`}
+                              >
+                                <div className="text-xs font-semibold mb-1 opacity-90">
+                                  {message.user_id}
+                                </div>
+
+                                <p className="text-sm whitespace-pre-wrap break-words">
+                                  {message.content}
+                                </p>
+
+                                <div
+                                  className={`text-[11px] mt-2 ${
+                                    isMine ? "text-blue-100" : "text-slate-500"
+                                  }`}
+                                >
+                                  {new Date(message.created_at).toLocaleDateString("fr-FR")} à{" "}
+                                  {new Date(message.created_at).toLocaleTimeString("fr-FR", {
+                                    hour: "2-digit",
+                                    minute: "2-digit",
+                                  })}
+                                </div>
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="flex gap-3">
+                    <textarea
+                      value={discussionInput}
+                      onChange={(e) => setDiscussionInput(e.target.value)}
+                      placeholder="Tapez votre message..."
+                      rows={3}
+                      className="flex-1 border border-slate-200 rounded-md px-3 py-2 bg-white text-sm resize-none"
+                    />
+
+                    <Button
+                      onClick={handleSendDiscussionMessage}
+                      disabled={sendingDiscussion || !discussionInput.trim()}
+                    >
+                      {sendingDiscussion ? "Envoi..." : "Envoyer"}
+                    </Button>
+                  </div>
+                </div>
               </CardContent>
             </Card>
           </TabsContent>

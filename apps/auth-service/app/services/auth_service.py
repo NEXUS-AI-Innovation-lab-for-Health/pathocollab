@@ -26,6 +26,13 @@ class AuthService:
             UserRole.ONCOLOGUE,
             UserRole.RADIOLOGUE,
         ]
+    
+    @staticmethod
+    def _case_creator_roles():
+        return [
+            UserRole.ADMIN,
+            UserRole.MEDECIN_GENERALISTE,
+        ]
 
     @staticmethod
     async def register_user(db: AsyncSession, user_data: UserCreate) -> User:
