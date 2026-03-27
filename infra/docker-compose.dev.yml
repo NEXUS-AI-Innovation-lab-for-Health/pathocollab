@@ -204,6 +204,10 @@ services:
     environment:
       IMAGES_INTERNAL_HOST: images-service
       IMAGES_INTERNAL_PORT: "8004"
+    depends_on:
+      - images-service
+    networks:
+      - pixtral-network
 
   backend-gateway:
     build:

@@ -1,10 +1,3 @@
-"""Add more specialists
-
-Revision ID: 003
-Revises: 002
-Create Date: 2026-02-03 17:32:00.000000
-"""
-
 from alembic import op
 import sqlalchemy as sa
 from passlib.context import CryptContext

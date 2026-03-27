@@ -157,6 +157,24 @@ async def get_image_annotations(
     return [_serialize_annotation(ann) for ann in annotations]
 
 
+@router.get("/image/{image_id}/case/{case_id}", response_model=List[Annotation])
+async def get_case_image_annotations(
+    image_id: str,
+    case_id: str,
+    db: AsyncSession = Depends(get_db_override),
+):
+    result = await db.execute(
+        select(AnnotationDB)
+        .where(
+            AnnotationDB.image_id == image_id,
+            AnnotationDB.case_id == case_id,
+        )
+        .order_by(AnnotationDB.created_at.desc())
+    )
+    annotations = result.scalars().all()
+    return [_serialize_annotation(ann) for ann in annotations]
+    
+
 @router.get("/{annotation_id}", response_model=Annotation)
 async def get_annotation(
     annotation_id: str,

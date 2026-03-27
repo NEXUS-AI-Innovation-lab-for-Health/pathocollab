@@ -1,9 +1,3 @@
-"""Initial migration - Create users table
-
-Revision ID: 001
-Revises: 
-Create Date: 2024-12-01
-"""
 from alembic import op
 import sqlalchemy as sa
 from sqlalchemy.dialects import postgresql

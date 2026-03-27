@@ -199,8 +199,21 @@ def _to_case_response(db_case: CaseDB) -> Case:
 
 
 @router.post("/create", response_model=Case, status_code=status.HTTP_201_CREATED)
-async def create_case(case_data: CaseCreate, db: AsyncSession = Depends(get_db)):
+async def create_case(
+    case_data: CaseCreate,
+    db: AsyncSession = Depends(get_db),
+    current_user=Depends(get_current_user_override),
+):
+    creator = (
+        current_user.get("email")
+        or current_user.get("sub")
+        or current_user.get("full_name")
+        or current_user.get("name")
+        or ""
+    )
+
     payload = case_data.model_dump()
+    payload["created_by"] = creator
 
     db_case = CaseDB(**payload)
 

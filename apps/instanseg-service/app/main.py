@@ -89,8 +89,6 @@ def mask_to_polygons(label_mask: np.ndarray, offset_x: float = 0, offset_y: floa
 def _strip_dzi_suffix(source_url: str) -> str:
     if source_url.endswith(".dzi"):
         return source_url[:-4]
-    if source_url.endswith("/dzi"):
-        return source_url[:-4]
     return source_url
 
 def fetch_dzi_metadata(source_url: str, headers: Optional[dict] = None):
@@ -134,8 +132,15 @@ def fetch_dzi_metadata(source_url: str, headers: Optional[dict] = None):
 
 def build_tile_url(source_url: str, level: int, col: int, row: int, fmt: str):
     resolved = resolve_internal_source_url(source_url)
-    base = _strip_dzi_suffix(resolved)
-    return f"{base}_files/{level}/{col}_{row}.{fmt}"
+
+    if resolved.endswith(".dzi"):
+        tile_base = resolved[:-4]
+    elif resolved.endswith("/dzi"):
+        tile_base = resolved
+    else:
+        tile_base = resolved
+
+    return f"{tile_base}_files/{level}/{col}_{row}.{fmt}"
 
 def extract_patch_from_dzi(
     source_url: str,

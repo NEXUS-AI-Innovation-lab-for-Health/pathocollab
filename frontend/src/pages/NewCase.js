@@ -321,11 +321,10 @@ const NewCase = () => {
       setSubmitting(true);
 
       const currentUser = await getCurrentUser();
-      const userName =
-        currentUser?.fullName ||
-        currentUser?.full_name ||
-        currentUser?.name ||
-        "Utilisateur inconnu";
+      const creatorEmail =
+        currentUser?.email ||
+        currentUser?.sub ||
+        "";
 
       const priorityValue = priorityField?.field_key
         ? formValues[priorityField.field_key] || null
@@ -347,10 +346,10 @@ const NewCase = () => {
         title: `Cas pour ${selectedPatient.full_name}`,
         description,
         status: "pending",
-        created_by: userName,
+        created_by: creatorEmail,
         assigned_specialists: selectedSpecialists.map((s) => s.email),
-        assigned_generalists: selectedGeneralists.map((s) => s.email),
       };
+
       const response = await axios.post(
         `${CASES_API}/api/cases/create/`,
         caseData,
@@ -364,7 +363,7 @@ const NewCase = () => {
 
       const workflowData = {
         case_id: response.data.id,
-        specialists_order: selectedWorkflowSpecialists.map((s) => s.email),
+        specialists_order: selectedSpecialists.map((s) => s.email),
       };
 
       await axios.post(`${WORKFLOW_API}/api/workflows/`, workflowData, {

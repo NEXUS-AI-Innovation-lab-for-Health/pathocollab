@@ -70,6 +70,11 @@ const Dashboard = () => {
     return role === "admin" || role === "medecin_generaliste";
   };
 
+  const isAdmin = () => {
+    const role = getCurrentUserRole();
+    return role === "admin";
+  };
+
   const statusOptions = [
     "Tous les statuts",
     "En attente",
@@ -203,7 +208,7 @@ const Dashboard = () => {
       const payload = JSON.parse(atob(token.split(".")[1]));
       return {
         email: (payload.sub || payload.email || "").toLowerCase(),
-        fullName: payload.full_name || payload.name || "",
+        fullName: (payload.full_name || payload.name || "").toLowerCase(),
         role: payload.role || "",
       };
     } catch (e) {
@@ -215,7 +220,6 @@ const Dashboard = () => {
   const isUserAssignedToCase = (caseItem, currentUser) => {
     if (!currentUser) return false;
 
-    // L’admin peut tout voir
     if (currentUser.role === "admin") return true;
 
     const assigned = Array.isArray(caseItem.assigned_specialists)
@@ -223,18 +227,16 @@ const Dashboard = () => {
       : [];
 
     const userEmail = currentUser.email;
-    const userFullName = currentUser.fullName.toLowerCase();
+    const userFullName = currentUser.fullName;
 
-    return assigned.some((specialist) => {
+    const isAssigned = assigned.some((specialist) => {
       if (!specialist) return false;
 
-      // Cas 1 : tableau de chaînes
       if (typeof specialist === "string") {
         const value = specialist.toLowerCase();
         return value === userEmail || value === userFullName;
       }
 
-      // Cas 2 : tableau d’objets
       if (typeof specialist === "object") {
         const specialistEmail = (specialist.email || specialist.mail || "").toLowerCase();
         const specialistName = (
@@ -249,6 +251,14 @@ const Dashboard = () => {
 
       return false;
     });
+
+    const createdBy = (caseItem.created_by || "").toLowerCase();
+
+    const isCreator =
+      createdBy === userEmail ||
+      createdBy === userFullName;
+
+    return isAssigned || isCreator;
   };
 
   const fetchCases = async () => {
@@ -671,7 +681,7 @@ const Dashboard = () => {
                             >
                               Voir
                             </Button>
-                            {canCreateCase() && (
+                            {isAdmin() && (
                               <Button
                                 variant="outline"
                                 size="sm"

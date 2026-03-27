@@ -242,6 +242,11 @@ export default function OpenSeadragonUrlViewer(
     return Boolean(imageKey) && role !== "medecin_generaliste" && role !== "admin";
   }, [imageKey]);
 
+  const scopedImageKey = useMemo(() => {
+    if (!imageKey || !caseId) return null;
+    return `${caseId}::${imageKey}`;
+  }, [caseId, imageKey]);
+
   function getCurrentUser() {
     const token =
       localStorage.getItem("access_token") ||
@@ -771,7 +776,7 @@ export default function OpenSeadragonUrlViewer(
 
       const updated = annotationsRef.current.find((a) => a.id === annId);
       if (updated) {
-        saveAnnotations(imageKey, annotationsRef.current);
+        if (scopedImageKey) saveAnnotations(scopedImageKey, annotationsRef.current);
         await persistAnnotationGeometry(updated);
       }
     };
@@ -789,26 +794,32 @@ export default function OpenSeadragonUrlViewer(
 
   async function fetchAnnotationsForImage(
     imgId: string,
+    cId: string,
   ): Promise<ApiAnnotationRow[]> {
-    const res = await fetch(`${IMAGES_API}/api/annotations/image/${imgId}`, {
-      headers: {
-        ...authHeaders(),
-      },
-    });
+    const res = await fetch(
+      `${IMAGES_API}/api/annotations/image/${imgId}/case/${cId}`,
+      {
+        headers: {
+          ...authHeaders(),
+        },
+      }
+    );
+
     if (!res.ok) {
       const text = await res.text().catch(() => "");
       console.error(
-        "GET /api/annotations/image/imageID error:",
+        "GET /api/annotations/image/{image_id}/case/{case_id} error:",
         res.status,
         text,
       );
       throw new Error(`GET annotation failed: ${res.status} - ${text}`);
     }
+
     return (await res.json()) as ApiAnnotationRow[];
   }
 
   async function runInstantSegOnSelection(rectPx: { x: number; y: number; w: number; h: number }) {
-    if (!imageKey) return;
+    if (!scopedImageKey) return;
 
     setInstansegLoading(true);
 
@@ -893,7 +904,7 @@ export default function OpenSeadragonUrlViewer(
 
       setAnnotations((prev) => {
         const next = [...prev, ...aiAnnotations];
-        saveAnnotations(imageKey, next);
+        if (scopedImageKey) saveAnnotations(scopedImageKey, next);
         return next;
       });
 
@@ -991,7 +1002,7 @@ export default function OpenSeadragonUrlViewer(
                 }
               : a
           );
-          saveAnnotations(imageKey, next);
+          if (scopedImageKey) saveAnnotations(scopedImageKey, next);
           return next;
         });
       } catch (e) {
@@ -1198,7 +1209,7 @@ export default function OpenSeadragonUrlViewer(
 
     setAnnotations((prev) => {
       const next = prev.filter((a) => a.id !== annToDelete.id);
-      saveAnnotations(imageKey, next);
+      if (scopedImageKey) saveAnnotations(scopedImageKey, next);
       return next;
     });
 
@@ -1215,7 +1226,7 @@ export default function OpenSeadragonUrlViewer(
         const exists = prev.some((a) => a.id === annToDelete.id);
         if (exists) return prev;
         const next = [...prev, annToDelete];
-        saveAnnotations(imageKey, next);
+        if (scopedImageKey) saveAnnotations(scopedImageKey, next);
         return next;
       });
 
@@ -1224,14 +1235,14 @@ export default function OpenSeadragonUrlViewer(
   };
 
   const deleteAnnotationFromList = async (ann: Annotation) => {
-    if (!imageKey) return;
+    if (!scopedImageKey) return;
     if (!canEditAnnotation(ann)) return;
 
     const previous = [...annotationsRef.current];
 
     setAnnotations((prev) => {
       const next = prev.filter((a) => a.id !== ann.id);
-      saveAnnotations(imageKey, next);
+      if (scopedImageKey) saveAnnotations(scopedImageKey, next);
       return next;
     });
 
@@ -1244,7 +1255,7 @@ export default function OpenSeadragonUrlViewer(
     } catch (e) {
       console.error("Erreur suppression annotation depuis liste:", e);
       setAnnotations(previous);
-      saveAnnotations(imageKey, previous);
+      if (scopedImageKey) saveAnnotations(scopedImageKey, previous);
       alert("La suppression de l’annotation a échoué côté serveur.");
     }
   };
@@ -1253,13 +1264,13 @@ export default function OpenSeadragonUrlViewer(
     let cancelled = false;
 
     async function run() {
-      if (!imageKey || !imageId) {
+      if (!scopedImageKey || !imageId || !caseId) {
         setAnnotations([]);
         return;
       }
 
       try {
-        const apiAnnotations = await fetchAnnotationsForImage(imageId);
+        const apiAnnotations = await fetchAnnotationsForImage(imageId, caseId);
         if (cancelled) return;
 
         const mapped: Annotation[] = apiAnnotations
@@ -1267,13 +1278,13 @@ export default function OpenSeadragonUrlViewer(
           .filter(Boolean) as Annotation[];
 
         setAnnotations(mapped);
-        saveAnnotations(imageKey, mapped);
+        if (scopedImageKey) saveAnnotations(scopedImageKey, mapped);
       } catch (e) {
         console.error("Erreur chargement annotations API:", e);
 
         if (!cancelled) {
           setAnnotations([]);
-          saveAnnotations(imageKey, []);
+          if (scopedImageKey) saveAnnotations(scopedImageKey, []);
         }
       }
     }
@@ -1832,7 +1843,7 @@ export default function OpenSeadragonUrlViewer(
 
       const updated = annotationsRef.current.find((a) => a.id === annId);
       if (updated) {
-        saveAnnotations(imageKey, annotationsRef.current);
+        if (scopedImageKey) saveAnnotations(scopedImageKey, annotationsRef.current);
         await persistAnnotationGeometry(updated);
       }
     };
@@ -1916,13 +1927,13 @@ export default function OpenSeadragonUrlViewer(
   };
 
   const onClear = async () => {
-    if (!imageKey) return;
+    if (!scopedImageKey) return;
     if (annotations.length === 0) return;
 
     const toDelete = [...annotations];
 
     setAnnotations([]);
-    saveAnnotations(imageKey, []);
+    if (scopedImageKey) saveAnnotations(scopedImageKey, []);
     switchToFreePanMode();
 
     try {
@@ -1931,7 +1942,7 @@ export default function OpenSeadragonUrlViewer(
       console.error("Erreur suppression annotations API:", e);
 
       setAnnotations(toDelete);
-      saveAnnotations(imageKey, toDelete);
+      if (scopedImageKey) saveAnnotations(scopedImageKey, toDelete);
       alert("La suppression des annotations a échoué côté serveur.");
     }
   };
@@ -2086,7 +2097,7 @@ export default function OpenSeadragonUrlViewer(
     // affichage immédiat optimiste
     setAnnotations((prev) => {
       const next = [...prev, localAnn];
-      saveAnnotations(imageKey, next);
+      if (scopedImageKey) saveAnnotations(scopedImageKey, next);
       return next;
     });
 
@@ -2132,7 +2143,7 @@ export default function OpenSeadragonUrlViewer(
 
       setAnnotations((prev) => {
         const next = prev.map((a) => (a.id === tempId ? savedAnn : a));
-        saveAnnotations(imageKey, next);
+        if (scopedImageKey) saveAnnotations(scopedImageKey, next);
         return next;
       });
 
@@ -2142,7 +2153,7 @@ export default function OpenSeadragonUrlViewer(
 
       setAnnotations((prev) => {
         const next = prev.filter((a) => a.id !== tempId);
-        saveAnnotations(imageKey, next);
+        if (scopedImageKey) saveAnnotations(scopedImageKey, next);
         return next;
       });
 
@@ -2158,7 +2169,12 @@ export default function OpenSeadragonUrlViewer(
           .map((a) => (a.category || "").trim())
           .filter(Boolean)
       )
-    ).sort((a, b) => a.localeCompare(b, "fr"));
+    ).sort((a, b) =>
+        String(a ?? "").localeCompare(String(b ?? ""), "fr", {
+          sensitivity: "base", // ignore accents (é = e)
+          ignorePunctuation: true,
+        })
+      );
   }, [annotations]);
 
   const availableTags = useMemo(() => {
@@ -2168,7 +2184,12 @@ export default function OpenSeadragonUrlViewer(
           (a.tags || []).map((tag) => String(tag || "").trim()).filter(Boolean)
         )
       )
-    ).sort((a, b) => a.localeCompare(b, "fr"));
+    ).sort((a, b) =>
+        String(a ?? "").localeCompare(String(b ?? ""), "fr", {
+          sensitivity: "base", // ignore accents (é = e)
+          ignorePunctuation: true,
+        })
+      );
   }, [annotations]);
 
   const availableSeverities = useMemo(() => {
@@ -2178,7 +2199,12 @@ export default function OpenSeadragonUrlViewer(
           .map((a) => (a.severity || "").trim())
           .filter(Boolean)
       )
-    ).sort((a, b) => a.localeCompare(b, "fr"));
+    ).sort((a, b) =>
+        String(a ?? "").localeCompare(String(b ?? ""), "fr", {
+          sensitivity: "base", // ignore accents (é = e)
+          ignorePunctuation: true,
+        })
+      );
   }, [annotations]);
 
   const availableOwners = useMemo(() => {
@@ -2188,7 +2214,12 @@ export default function OpenSeadragonUrlViewer(
           .map((a) => (a.ownerName || a.ownerId || "").trim())
           .filter(Boolean)
       )
-    ).sort((a, b) => a.localeCompare(b, "fr"));
+    ).sort((a, b) =>
+        String(a ?? "").localeCompare(String(b ?? ""), "fr", {
+          sensitivity: "base", // ignore accents (é = e)
+          ignorePunctuation: true,
+        })
+      );
   }, [annotations]);
 
   const annotationItems = useMemo(() => {
@@ -2900,7 +2931,7 @@ export default function OpenSeadragonUrlViewer(
                       const next = prev.map((a) =>
                         a.id === selectedAnnotation.id ? updated : a
                       );
-                      saveAnnotations(imageKey, next);
+                      if (scopedImageKey) saveAnnotations(scopedImageKey, next);
                       return next;
                     });
 
