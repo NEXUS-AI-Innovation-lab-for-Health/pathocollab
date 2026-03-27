@@ -81,6 +81,7 @@ const Dashboard = () => {
     "En cours",
     "Terminé",
     "Annulé",
+    "Fermé",
   ];
 
   useEffect(() => {
@@ -222,6 +223,11 @@ const Dashboard = () => {
 
     if (currentUser.role === "admin") return true;
 
+    if (currentUser.role === "medecin_generaliste") {
+      const createdBy = (caseItem.created_by || "").toLowerCase();
+      return createdBy === currentUser.email || createdBy === currentUser.fullName;
+    }
+
     const assigned = Array.isArray(caseItem.assigned_specialists)
       ? caseItem.assigned_specialists
       : [];
@@ -342,6 +348,7 @@ const Dashboard = () => {
       in_progress: "bg-blue-100 text-blue-800",
       completed: "bg-green-100 text-green-800",
       cancelled: "bg-red-100 text-red-800",
+      closed: "bg-slate-200 text-slate-800",
     };
     return colors[status] || "bg-gray-100 text-gray-800";
   };
@@ -352,6 +359,7 @@ const Dashboard = () => {
       in_progress: "En cours",
       completed: "Terminé",
       cancelled: "Annulé",
+      closed: "Fermé",
     };
     return labels[status] || status;
   };
@@ -374,7 +382,8 @@ const Dashboard = () => {
       (statusFilter === "En attente" && caseItem.status === "pending") ||
       (statusFilter === "En cours" && caseItem.status === "in_progress") ||
       (statusFilter === "Terminé" && caseItem.status === "completed") ||
-      (statusFilter === "Annulé" && caseItem.status === "cancelled");
+      (statusFilter === "Annulé" && caseItem.status === "cancelled") ||
+      (statusFilter === "Fermé" && caseItem.status === "closed");
 
     return matchesSearch && matchesStatus;
   });

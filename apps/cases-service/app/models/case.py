@@ -11,11 +11,12 @@ class CaseStatus(str, enum.Enum):
     IN_PROGRESS = "in_progress"
     COMPLETED = "completed"
     CANCELLED = "cancelled"
+    CLOSED = "closed"
 
 class CaseDB(Base):
     __tablename__ = "cases"
     
-    id = Column(String, primary_key=True, default=lambda: f"BIO-2025-{str(uuid.uuid4().int)[:6]}")
+    id = Column(String, primary_key=True, default=lambda: f"BIO-2026-{str(uuid.uuid4().int)[:6]}")
     patient_id = Column(String, nullable=False, index=True)
     title = Column(String, nullable=False)
     description = Column(Text, nullable=True)

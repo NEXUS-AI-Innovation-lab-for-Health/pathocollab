@@ -1299,6 +1299,50 @@ export default function OpenSeadragonUrlViewer(
     return null;
   }
 
+  function zoomToAnnotation(ann: Annotation) {
+    const viewer = viewerRef.current;
+    if (!viewer) return;
+
+    let rect:
+      | { x: number; y: number; w: number; h: number }
+      | null = null;
+
+    if (ann.type === "rect") {
+      rect = { x: ann.x, y: ann.y, w: ann.w, h: ann.h };
+    } else if (ann.type === "circle") {
+      rect = {
+        x: ann.cx - ann.rx,
+        y: ann.cy - ann.ry,
+        w: ann.rx * 2,
+        h: ann.ry * 2,
+      };
+    } else if (ann.type === "polygon" && ann.points.length > 0) {
+      const b = polygonBounds(ann.points);
+      rect = {
+        x: b.minX,
+        y: b.minY,
+        w: Math.max(1, b.w),
+        h: Math.max(1, b.h),
+      };
+    }
+
+    if (!rect) return;
+
+    const paddingFactor = 0.15;
+    const padX = rect.w * paddingFactor;
+    const padY = rect.h * paddingFactor;
+
+    const targetRect = imageRectToViewportRect(viewer, {
+      x: rect.x - padX,
+      y: rect.y - padY,
+      w: Math.max(1, rect.w + padX * 2),
+      h: Math.max(1, rect.h + padY * 2),
+    });
+
+    setSelectedAnnotation(ann);
+    viewer.viewport.fitBounds(targetRect, true);
+  }
+
   function mapApiAnnotationToFrontend(a: ApiAnnotationRow): Annotation | null {
     const coords =
       a.coordinates && typeof a.coordinates === "object" ? a.coordinates : {};
@@ -2442,6 +2486,23 @@ export default function OpenSeadragonUrlViewer(
     }
   };
 
+  const normalizeFilterValue = (value: unknown) =>
+    String(value ?? "")
+      .trim()
+      .toLowerCase()
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "");
+
+  const matchesFilter = (candidate: unknown, filterValue: string) => {
+    if (!filterValue) return true;
+    return normalizeFilterValue(candidate) === normalizeFilterValue(filterValue);
+  };
+
+  const matchesTagFilter = (tags: string[] | null | undefined, filterValue: string) => {
+    if (!filterValue) return true;
+    return (tags || []).some((tag) => matchesFilter(tag, filterValue));
+  };
+
   const availableCategories = useMemo(() => {
     return Array.from(
       new Set(
@@ -2515,18 +2576,25 @@ export default function OpenSeadragonUrlViewer(
         if (isInstantSegPolygon(a)) return false;
 
         // pour InstantSeg, ne garder que le rectangle groupe
-        if (isInstantSegAnnotation(a)) {
-          return isIaGroupRect(a);
+        if (isInstantSegAnnotation(a) && !isIaGroupRect(a)) {
+          return false;
         }
 
-        return true;
+        const owner = a.ownerName || a.ownerId || "";
+
+        const categoryOk = matchesFilter(a.category || "", filterCategory);
+        const tagOk = matchesTagFilter(a.tags, filterTag);
+        const severityOk = matchesFilter(a.severity || "", filterSeverity);
+        const ownerOk = matchesFilter(owner, filterOwner);
+
+        return categoryOk && tagOk && severityOk && ownerOk;
       })
       .sort((a, b) => {
         const da = new Date(a.createdAt).getTime();
         const db = new Date(b.createdAt).getTime();
         return db - da;
       });
-  }, [annotations]);
+  }, [annotations, filterCategory, filterTag, filterSeverity, filterOwner]);
 
   return (
     <div
@@ -2873,11 +2941,13 @@ export default function OpenSeadragonUrlViewer(
                 return (
                   <div
                     key={ann.id}
+                    onClick={() => zoomToAnnotation(ann)}
                     style={{
                       ...styles.annotationCard,
                       ...(selectedAnnotation?.id === ann.id
                         ? styles.annotationCardActive
                         : null),
+                      cursor: "pointer",
                     }}
                   >
                     <div style={styles.annotationCardTop}>
@@ -2912,7 +2982,8 @@ export default function OpenSeadragonUrlViewer(
                       <button
                         type="button"
                         style={modalStyles.secondaryBtn}
-                        onClick={() => {
+                        onClick={(e) => {
+                          e.stopPropagation();
                           openAnnotationDetails(ann);
                         }}
                       >
@@ -2927,7 +2998,8 @@ export default function OpenSeadragonUrlViewer(
                             border: "1px solid #dc2626",
                             color: "#dc2626",
                           }}
-                          onClick={() => {
+                          onClick={(e) => {
+                            e.stopPropagation();
                             void deleteAnnotationFromList(ann);
                           }}
                         >
@@ -3725,6 +3797,8 @@ const styles: Record<string, React.CSSProperties> = {
     display: "grid",
     gap: 8,
     background: "#fff",
+    cursor: "pointer",
+    transition: "0.15s ease",
   },
 
   annotationCardActive: {

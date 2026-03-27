@@ -13,6 +13,9 @@ import {
   MessageSquare,
   Download,
   Upload,
+  CheckCircle2,
+  FileCheck,
+  Lock,
 } from "lucide-react";
 import { toast } from "sonner";
 import axios from "axios";
@@ -41,6 +44,7 @@ const getStatusLabel = (status) => {
     in_progress: "En cours",
     completed: "Terminé",
     cancelled: "Annulé",
+    closed: "Fermé",
   };
   return labels[status] || status;
 };
@@ -51,6 +55,7 @@ const getStatusColor = (status) => {
     in_progress: "bg-blue-100 text-blue-800",
     completed: "bg-green-100 text-green-800",
     cancelled: "bg-red-100 text-red-800",
+    closed: "bg-slate-200 text-slate-800",
   };
   return colors[status] || "bg-gray-100 text-gray-800";
 };
@@ -67,6 +72,10 @@ const CaseDetail = () => {
   const [loading, setLoading] = useState(true);
   const [generatingPDF, setGeneratingPDF] = useState(false);
   const reportRefs = useRef({});
+
+  const [generatingFinalPDF, setGeneratingFinalPDF] = useState(false);
+  const [closingCase, setClosingCase] = useState(false);
+  const [finalPdfReady, setFinalPdfReady] = useState(false);
 
   const [imageMode, setImageMode] = useState("pathology");
 
@@ -121,6 +130,58 @@ const CaseDetail = () => {
     const currentUserId = getCurrentUserId();
     return currentUserId === "admin" || currentUserId === "admin@pixtral.fr";
   }, [getCurrentUserId]);
+
+  const isClosed = caseData?.status === "closed";
+
+
+  const getCurrentUserRole = useCallback(() => {
+    const token = localStorage.getItem("access_token");
+    if (!token) return null;
+
+    try {
+      const payload = JSON.parse(atob(token.split(".")[1]));
+      return payload.role || null;
+    } catch {
+      return null;
+    }
+  }, []);
+
+  const isMedecinGeneraliste = useCallback(() => {
+    return getCurrentUserRole() === "medecin_generaliste";
+  }, [getCurrentUserRole]);
+
+  const areAllReportsFinal = useMemo(() => {
+    if (!reports.length) return false;
+    return reports.every((report) => report.is_final === true);
+  }, [reports]);
+
+  const canGeneralistValidateFinalReport = useMemo(() => {
+    return isMedecinGeneraliste() && caseData?.status === "completed" && areAllReportsFinal;
+  }, [isMedecinGeneraliste, caseData?.status, areAllReportsFinal]);
+
+  const buildSafeFileName = (value) =>
+    (value || "rapport_final")
+      .toString()
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .replace(/[^a-zA-Z0-9_-]+/g, "_")
+      .replace(/_+/g, "_")
+      .replace(/^_|_$/g, "")
+      .toLowerCase();
+
+  const addWrappedText = (pdf, text, x, y, maxWidth, lineHeight = 6) => {
+    const lines = pdf.splitTextToSize(text || "", maxWidth);
+    lines.forEach((line) => {
+      if (y > 280) {
+        pdf.addPage();
+        y = 20;
+      }
+      pdf.text(line, x, y);
+      y += lineHeight;
+    });
+    return y;
+  };
+
 
   const fetchCaseDetails = useCallback(async () => {
     try {
@@ -198,6 +259,259 @@ const CaseDetail = () => {
       setLoadingReports(false);
     }
   }, [caseId, getAuthHeaders]);
+
+  const getWorkflowProgressPercent = () => {
+    if (!workflow?.specialists_order?.length) return 0;
+
+    const total = workflow.specialists_order.length;
+
+    if (workflow.is_completed) return 100;
+
+    return Math.min(
+      100,
+      Math.round((workflow.current_step / total) * 100)
+    );
+  };
+
+  const getWorkflowMemberStatus = (specialist, index) => {
+    if (!workflow?.specialists_order?.length) {
+      return {
+        label: "Non défini",
+        className: "bg-slate-100 text-slate-700",
+        description: "Aucun workflow disponible",
+      };
+    }
+
+    if (workflow.is_completed) {
+      return {
+        label: "Terminé",
+        className: "bg-green-100 text-green-800",
+        description: "Étape validée",
+      };
+    }
+
+    if (index < workflow.current_step) {
+      return {
+        label: "Terminé",
+        className: "bg-green-100 text-green-800",
+        description: "Rapport déjà réalisé",
+      };
+    }
+
+    if (index === workflow.current_step) {
+      return {
+        label: "En cours",
+        className: "bg-blue-100 text-blue-800",
+        description: "Étape actuelle",
+      };
+    }
+
+    return {
+      label: "En attente",
+      className: "bg-yellow-100 text-yellow-800",
+      description: "En attente du tour",
+    };
+  };
+
+  const getWorkflowCurrentStepLabel = () => {
+    if (!workflow?.specialists_order?.length) {
+      return "Aucun workflow défini";
+    }
+
+    if (workflow.is_completed) {
+      return `Workflow terminé (${workflow.specialists_order.length}/${workflow.specialists_order.length})`;
+    }
+
+    return `Étape ${Math.min(
+      workflow.current_step + 1,
+      workflow.specialists_order.length
+    )}/${workflow.specialists_order.length}`;
+  };
+
+  const getWorkflowMembers = () => {
+    if (workflow?.specialists_order?.length) {
+      return workflow.specialists_order;
+    }
+    return caseData?.assigned_specialists || [];
+  };
+
+  const handleGenerateFinalConsolidatedPDF = async () => {
+    if (!canGeneralistValidateFinalReport) {
+      toast.error("Vous ne pouvez pas générer le rapport final consolidé");
+      return;
+    }
+
+    setGeneratingFinalPDF(true);
+
+    try {
+      const pdf = new jsPDF();
+      let yPos = 20;
+
+      const ensurePage = (extra = 0) => {
+        if (yPos + extra > 280) {
+          pdf.addPage();
+          yPos = 20;
+        }
+      };
+
+      pdf.setFont("helvetica", "bold");
+      pdf.setFontSize(18);
+      pdf.text("Rapport final consolidé", 20, yPos);
+      yPos += 10;
+
+      pdf.setFontSize(12);
+      pdf.setFont("helvetica", "normal");
+      pdf.text(`Cas : ${caseData?.id || "-"}`, 20, yPos);
+      yPos += 7;
+      pdf.text(`Titre : ${caseData?.title || "-"}`, 20, yPos);
+      yPos += 7;
+      pdf.text(`Patient : ${patient?.full_name || patient?.id || caseData?.patient_id || "-"}`, 20, yPos);
+      yPos += 7;
+      pdf.text(
+        `Validé par le médecin généraliste : ${getCurrentUserId()}`,
+        20,
+        yPos
+      );
+      yPos += 10;
+
+      if (patient) {
+        pdf.setFont("helvetica", "bold");
+        pdf.setFontSize(14);
+        ensurePage(10);
+        pdf.text("Contexte patient", 20, yPos);
+        yPos += 8;
+
+        pdf.setFont("helvetica", "normal");
+        pdf.setFontSize(11);
+
+        const patientLines = [
+          `Identifiant patient : ${patient.id || "-"}`,
+          `Nom : ${patient.full_name || "-"}`,
+          `Âge : ${patient.age ?? "-"}`,
+          `Genre : ${patient.gender || "-"}`,
+          `Antécédents : ${patient.medical_history || "Non renseignés"}`,
+          `Symptômes : ${patient.symptoms || "Non renseignés"}`,
+        ];
+
+        for (const line of patientLines) {
+          ensurePage(8);
+          yPos = addWrappedText(pdf, line, 20, yPos, 170);
+          yPos += 1;
+        }
+        yPos += 4;
+      }
+
+      pdf.setFont("helvetica", "bold");
+      pdf.setFontSize(14);
+      ensurePage(10);
+      pdf.text("Synthèse des rapports spécialistes", 20, yPos);
+      yPos += 10;
+
+      const sortedReports = [...reports].sort((a, b) => {
+        const aDate = new Date(a.created_at).getTime();
+        const bDate = new Date(b.created_at).getTime();
+        return aDate - bDate;
+      });
+
+      sortedReports.forEach((report, index) => {
+        ensurePage(20);
+
+        pdf.setFont("helvetica", "bold");
+        pdf.setFontSize(13);
+        pdf.text(
+          `${index + 1}. ${report.title || "Rapport sans titre"}`,
+          20,
+          yPos
+        );
+        yPos += 7;
+
+        pdf.setFont("helvetica", "normal");
+        pdf.setFontSize(11);
+        pdf.text(
+          `Auteur : ${report.user_id} | Date : ${new Date(report.created_at).toLocaleString("fr-FR")}`,
+          20,
+          yPos
+        );
+        yPos += 8;
+
+        const cleanedContent = (report.content || "")
+          .replace(/\*\*/g, "")
+          .replace(/#+/g, "")
+          .trim();
+
+        yPos = addWrappedText(pdf, cleanedContent, 20, yPos, 170, 6);
+        yPos += 8;
+      });
+
+      ensurePage(20);
+      pdf.setFont("helvetica", "bold");
+      pdf.setFontSize(14);
+      pdf.text("Conclusion consolidée", 20, yPos);
+      yPos += 8;
+
+      pdf.setFont("helvetica", "normal");
+      pdf.setFontSize(11);
+      yPos = addWrappedText(
+        pdf,
+        `L'ensemble des rapports spécialistes du cas ${caseData?.id} a été relu et validé. Ce document constitue la synthèse consolidée transmise après validation finale du médecin généraliste.`,
+        20,
+        yPos,
+        170,
+        6
+      );
+
+      const filename = `rapport_final_${buildSafeFileName(caseData?.id)}.pdf`;
+      pdf.save(filename);
+
+      setFinalPdfReady(true);
+      toast.success("Rapport final consolidé généré avec succès");
+    } catch (error) {
+      console.error("Erreur génération rapport final consolidé:", error);
+      toast.error("Erreur lors de la génération du rapport final");
+    } finally {
+      setGeneratingFinalPDF(false);
+    }
+  };
+
+  const handleCloseCase = async () => {
+    if (!canGeneralistValidateFinalReport) {
+      toast.error("Vous ne pouvez pas fermer ce cas");
+      return;
+    }
+
+    if (!finalPdfReady) {
+      toast.error("Générez d'abord le PDF final consolidé");
+      return;
+    }
+
+    const confirmed = window.confirm(
+      "Confirmez-vous la fermeture définitive de ce cas ?"
+    );
+    if (!confirmed) return;
+
+    try {
+      setClosingCase(true);
+
+      await axios.post(
+        `${CASES_API}/api/cases/${caseId}/close`,
+        {
+          closed_by: getCurrentUserId(),
+        },
+        {
+          headers: getAuthHeaders(),
+        }
+      );
+
+      toast.success("Cas fermé avec succès");
+      await fetchCaseDetails();
+      await fetchReports();
+    } catch (error) {
+      console.error("Erreur fermeture du cas:", error);
+      toast.error("Erreur lors de la fermeture du cas");
+    } finally {
+      setClosingCase(false);
+    }
+  };
 
   const fetchRadiologySeries = useCallback(
     async (patientId) => {
@@ -326,17 +640,6 @@ const CaseDetail = () => {
       key: `${patient.id}:${selectedWsi.wsi_id}`,
     };
   }, [patient?.id, selectedWsi?.wsi_id]);
-
-  const getCurrentUserRole = useCallback(() => {
-    const token = localStorage.getItem("access_token");
-    if (!token) return null;
-    try {
-      const payload = JSON.parse(atob(token.split(".")[1]));
-      return payload.role || null;
-    } catch {
-      return null;
-    }
-  }, []);
 
   const canCreateReport = () => {
     if (!workflow || !workflow.specialists_order) return false;
@@ -587,7 +890,7 @@ const CaseDetail = () => {
               )}
             </div>
 
-            {canCreateReport() && (
+            {canCreateReport() && !isClosed && (
               <Button
                 data-testid="start-analysis-button"
                 onClick={() => navigate(`/cases/${caseId}/report`)}
@@ -620,7 +923,7 @@ const CaseDetail = () => {
             </TabsTrigger>
             <TabsTrigger value="discussion" data-testid="tab-discussion">
               <MessageSquare className="h-4 w-4 mr-2" />
-              Discussion
+                Discussion
             </TabsTrigger>
           </TabsList>
 
@@ -743,18 +1046,22 @@ const CaseDetail = () => {
                     </div>
 
                     <div className="flex items-center gap-2">
-                      <Button
-                        variant={imageMode === "pathology" ? "default" : "outline"}
-                        onClick={() => setImageMode("pathology")}
-                      >
-                        Pathologie
-                      </Button>
-                      <Button
-                        variant={imageMode === "radiology" ? "default" : "outline"}
-                        onClick={() => setImageMode("radiology")}
-                      >
-                        Radiologie
-                      </Button>
+                      {false && (
+                        <Button
+                          variant={imageMode === "pathology" ? "default" : "outline"}
+                          onClick={() => setImageMode("pathology")}
+                        >
+                          Pathologie
+                        </Button>
+                      )}
+                      {false && (
+                        <Button
+                          variant={imageMode === "radiology" ? "default" : "outline"}
+                          onClick={() => setImageMode("radiology")}
+                        >
+                          Radiologie
+                        </Button>
+                      )}
                     </div>
                   </div>
 
@@ -917,6 +1224,64 @@ const CaseDetail = () => {
               <CardHeader>
                 <CardTitle>Rapports des spécialistes</CardTitle>
               </CardHeader>
+
+              {canGeneralistValidateFinalReport && (
+                <Card className="mb-6 border-green-200 bg-green-50">
+                  <CardContent className="pt-6">
+                    <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
+                      <div>
+                        <div className="flex items-center gap-2 mb-2">
+                          <FileCheck className="h-5 w-5 text-green-700" />
+                          <h3 className="text-lg font-semibold text-green-900">
+                            Validation finale du médecin généraliste
+                          </h3>
+                        </div>
+                        <p className="text-sm text-green-800">
+                          Tous les rapports spécialistes sont finalisés. Vous pouvez générer
+                          un PDF final consolidé, le relire, puis fermer définitivement le cas.
+                        </p>
+                      </div>
+
+                      <div className="flex flex-wrap gap-2">
+                        <Button
+                          onClick={handleGenerateFinalConsolidatedPDF}
+                          disabled={generatingFinalPDF}
+                          className="bg-green-600 hover:bg-green-700 text-white"
+                        >
+                          <Download className="h-4 w-4 mr-2" />
+                          {generatingFinalPDF ? "Génération..." : "Générer le PDF final"}
+                        </Button>
+
+                        {false && (
+                          <Button
+                            variant="outline"
+                            onClick={handleCloseCase}
+                            disabled={!finalPdfReady || closingCase}
+                            className="border-slate-300"
+                          >
+                            <Lock className="h-4 w-4 mr-2" />
+                            {closingCase ? "Fermeture..." : "Fermer le cas"}
+                          </Button>
+                        )}
+                      </div>
+                    </div>
+
+                    {!finalPdfReady && (
+                      <p className="text-xs text-slate-600 mt-3">
+                        Le cas ne pourra être fermé qu’après génération du PDF final consolidé.
+                      </p>
+                    )}
+
+                    {finalPdfReady && (
+                      <div className="mt-3 flex items-center gap-2 text-sm text-green-700">
+                        <CheckCircle2 className="h-4 w-4" />
+                        PDF final prêt. Vous pouvez maintenant fermer le cas.
+                      </div>
+                    )}
+                  </CardContent>
+                </Card>
+              )}
+
               <CardContent>
                 {loadingReports ? (
                   <div className="flex items-center justify-center py-8">
@@ -1114,32 +1479,105 @@ const CaseDetail = () => {
           </TabsContent>
 
           <TabsContent value="team">
-            <Card>
-              <CardContent className="pt-6">
-                <div className="space-y-3">
-                  {caseData.assigned_specialists?.length ? (
-                    caseData.assigned_specialists.map((specialist, index) => (
-                      <div
-                        key={index}
-                        className="flex items-center gap-3 p-3 border border-slate-200 rounded-lg"
-                      >
-                        <div className="w-10 h-10 rounded-full bg-gradient-to-br from-blue-600 to-cyan-600 flex items-center justify-center text-white font-bold">
-                          {specialist.substring(0, 2).toUpperCase()}
+            <div className="space-y-6">
+              <Card>
+                <CardHeader>
+                  <CardTitle>Workflow du cas</CardTitle>
+                </CardHeader>
+
+                <CardContent className="space-y-6">
+                  {!workflow || !workflow.specialists_order?.length ? (
+                    <div className="text-sm text-slate-500">
+                      Aucun workflow disponible pour ce cas.
+                    </div>
+                  ) : (
+                    <>
+                      <div className="space-y-3">
+                        <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-2">
+                          <div>
+                            <p className="text-sm font-medium text-slate-900">
+                              {getWorkflowCurrentStepLabel()}
+                            </p>
+                            <p className="text-sm text-slate-500">
+                              {workflow.is_completed
+                                ? "Tous les spécialistes ont terminé leur étape."
+                                : `Spécialiste actuel : Dr. ${getCurrentSpecialist() || "-"}`}
+                            </p>
+                          </div>
+
+                          <Badge className={workflow.is_completed
+                            ? "bg-green-100 text-green-800"
+                            : "bg-blue-100 text-blue-800"
+                          }>
+                            {workflow.is_completed ? "Workflow terminé" : "Workflow en cours"}
+                          </Badge>
                         </div>
-                        <div>
-                          <p className="font-medium text-slate-900">{specialist}</p>
-                          <p className="text-sm text-slate-500">Spécialiste</p>
+
+                        <div className="w-full h-3 bg-slate-200 rounded-full overflow-hidden">
+                          <div
+                            className="h-full bg-blue-600 transition-all duration-300"
+                            style={{ width: `${getWorkflowProgressPercent()}%` }}
+                          />
+                        </div>
+
+                        <p className="text-xs text-slate-500">
+                          Progression : {getWorkflowProgressPercent()} %
+                        </p>
+                      </div>
+
+                      <div className="space-y-3">
+                        <h3 className="text-sm font-semibold text-slate-900">
+                          Liste des spécialistes
+                        </h3>
+
+                        <div className="space-y-3">
+                          {getWorkflowMembers().map((specialist, index) => {
+                            const status = getWorkflowMemberStatus(specialist, index);
+
+                            return (
+                              <div
+                                key={`${specialist}-${index}`}
+                                className="flex items-center justify-between gap-4 p-4 border border-slate-200 rounded-lg bg-white"
+                              >
+                                <div className="flex items-center gap-3">
+                                  <div
+                                    className={`w-10 h-10 rounded-full flex items-center justify-center font-bold ${
+                                      status.label === "Terminé"
+                                        ? "bg-green-100 text-green-700"
+                                        : status.label === "En cours"
+                                          ? "bg-blue-100 text-blue-700"
+                                          : "bg-yellow-100 text-yellow-700"
+                                    }`}
+                                  >
+                                    {index + 1}
+                                  </div>
+
+                                  <div>
+                                    <p className="font-medium text-slate-900">
+                                      Dr. {specialist}
+                                    </p>
+                                    <p className="text-sm text-slate-500">
+                                      Position {index + 1}
+                                    </p>
+                                  </div>
+                                </div>
+
+                                <div className="flex flex-col items-end gap-1">
+                                  <Badge className={status.className}>{status.label}</Badge>
+                                  <span className="text-xs text-slate-500">
+                                    {status.description}
+                                  </span>
+                                </div>
+                              </div>
+                            );
+                          })}
                         </div>
                       </div>
-                    ))
-                  ) : (
-                    <p className="text-center text-slate-500">
-                      Aucun spécialiste assigné
-                    </p>
+                    </>
                   )}
-                </div>
-              </CardContent>
-            </Card>
+                </CardContent>
+              </Card>
+            </div>
           </TabsContent>
 
           <TabsContent value="discussion">

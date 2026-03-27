@@ -2,6 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException, status, Header
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from typing import List
+from pydantic import BaseModel
 
 from app.models.case import Case, CaseCreate, CaseDB, CaseStatus
 from app.utils.database import get_db
@@ -11,11 +12,17 @@ from datetime import datetime, timezone
 import json
 import base64
 import httpx
+import logging
 
 router = APIRouter(prefix="/cases", tags=["Cases"])
 
 
+router = APIRouter(prefix="/cases", tags=["Cases"])
+
+logger = logging.getLogger(__name__)
+
 REPORTS_SERVICE_URL = os.getenv("REPORTS_SERVICE_URL", "http://reports-service:8005")
+WORKFLOW_SERVICE_URL = os.getenv("WORKFLOW_SERVICE_URL", "http://workflow-service:8003")
 
 
 def _normalize_identity(value: str | None) -> str:
@@ -112,13 +119,16 @@ async def _sync_case_completion(db: AsyncSession, db_case: CaseDB) -> CaseDB:
         if value
     }
 
+    if db_case.status == CaseStatus.CLOSED:
+        return db_case
+
     if not assigned_set:
         return db_case
 
     try:
         reports = await _extract_reports_for_case(db_case.id)
-    except Exception:
-        # On ne bloque pas le service des cas si reports-service est indisponible
+    except Exception as exc:
+        logger.warning("Impossible de récupérer les rapports pour %s: %s", db_case.id, exc)
         return db_case
 
     final_report_users = {
@@ -135,6 +145,7 @@ async def _sync_case_completion(db: AsyncSession, db_case: CaseDB) -> CaseDB:
             await db.refresh(db_case)
 
     return db_case
+
 
 def get_db_override():
     raise RuntimeError("get_db not injected")
@@ -256,6 +267,7 @@ async def update_case_status(case_id: str, status: CaseStatus, db: AsyncSession 
     case.status = status
     await db.commit()
     await db.refresh(case)
+    ensure_case_not_closed(case)
     return {"message": "Case status updated", "case_id": case_id, "new_status": status}
 
 
@@ -268,20 +280,126 @@ async def delete_case(case_id: str, db: AsyncSession = Depends(get_db)):
 
     await db.delete(case)
     await db.commit()
+    ensure_case_not_closed(case)
     return {"detail": "Case deleted", "id": case_id}
 
 
 @router.post("/{case_id}/sync-completion")
 async def sync_case_completion(case_id: str, db: AsyncSession = Depends(get_db)):
     result = await db.execute(select(CaseDB).where(CaseDB.id == case_id))
-    case = result.scalar_one_or_none()
-    if not case:
-        raise HTTPException(status_code=404, detail="Case not found")
+    case_obj = result.scalars().first()
 
-    case = await _sync_case_completion(db, case)
+    if not case_obj:
+        raise HTTPException(status_code=404, detail="Cas introuvable")
+
+    async with httpx.AsyncClient(timeout=10.0) as client:
+        reports_res = await client.get(f"{REPORTS_SERVICE_URL}/api/reports/case/{case_id}")
+        reports_res.raise_for_status()
+        reports = reports_res.json()
+
+    if not reports:
+        return {
+            "case_id": case_id,
+            "completed": False,
+            "reason": "Aucun rapport"
+        }
+
+    all_final = all(report.get("is_final") is True for report in reports)
+
+    if not all_final:
+        return {
+            "case_id": case_id,
+            "completed": False,
+            "reason": "Tous les rapports ne sont pas finalisés"
+        }
+
+    if case_obj.status != CaseStatus.COMPLETED:
+        case_obj.status = CaseStatus.COMPLETED
+        case_obj.completed_at = datetime.now(timezone.utc)
+        db.add(case_obj)
+        await db.commit()
+        await db.refresh(case_obj)
+
+    generalist_user = case_obj.created_by
+    generalist_notified = False
+
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            response = await client.post(
+                f"{WORKFLOW_SERVICE_URL}/api/notifications",
+                json={
+                    "user_id": generalist_user,
+                    "case_id": case_id,
+                    "title": "Cas complété",
+                    "message": f"Le cas {case_id} est terminé. Vous pouvez relire les rapports, générer le PDF final et fermer le cas."
+                },
+            )
+            generalist_notified = response.status_code < 400
+    except Exception as exc:
+        logger.exception("Erreur création notification fin de cas %s: %s", case_id, exc)
 
     return {
-        "case_id": case.id,
-        "status": case.status,
-        "completed_at": case.completed_at,
+        "case_id": case_id,
+        "completed": True,
+        "status": case_obj.status.value if hasattr(case_obj.status, "value") else case_obj.status,
+        "generalist_notified": generalist_notified,
+    }
+
+
+class CloseCasePayload(BaseModel):
+    closed_by: str
+
+def ensure_case_not_closed(case: CaseDB):
+    if case.status == CaseStatus.CLOSED:
+        raise HTTPException(
+            status_code=400,
+            detail="Ce cas est fermé et ne peut plus être modifié"
+        )
+
+@router.post("/{case_id}/close")
+async def close_case(
+    case_id: str,
+    payload: CloseCasePayload,
+    db: AsyncSession = Depends(get_db),
+    current_user=Depends(get_current_user_override),
+):
+    result = await db.execute(select(CaseDB).where(CaseDB.id == case_id))
+    case_obj = result.scalars().first()
+
+    if not case_obj:
+        raise HTTPException(status_code=404, detail="Cas introuvable")
+
+    if case_obj.status != CaseStatus.COMPLETED:
+        raise HTTPException(
+            status_code=400,
+            detail="Le cas doit être terminé avant de pouvoir être fermé"
+        )
+
+    current_identities = _user_identities(current_user)
+    creator_identity = _normalize_identity(case_obj.created_by)
+    closed_by_identity = _normalize_identity(payload.closed_by)
+    role = _user_role(current_user)
+
+    if role != "medecin_generaliste" and role != "admin":
+        raise HTTPException(
+            status_code=403,
+            detail="Seul un médecin généraliste peut fermer le cas"
+        )
+
+    if role != "admin":
+        if creator_identity not in current_identities and closed_by_identity not in current_identities:
+            raise HTTPException(
+                status_code=403,
+                detail="Seul le médecin généraliste créateur peut fermer le cas"
+            )
+
+    case_obj.status = CaseStatus.CLOSED
+    db.add(case_obj)
+    await db.commit()
+    await db.refresh(case_obj)
+
+    return {
+        "id": case_obj.id,
+        "status": case_obj.status.value if hasattr(case_obj.status, "value") else case_obj.status,
+        "closed_by": payload.closed_by,
     }

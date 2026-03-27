@@ -64,42 +64,56 @@ const ReportEditor = () => {
     }
   }, [caseId, isEditing]);
 
+  const getAuthHeaders = () => {
+    const token = localStorage.getItem("access_token");
+    return token ? { Authorization: `Bearer ${token}` } : {};
+  };
+
   const fetchCaseDetails = async () => {
     try {
       const response = await axios.get(
         `${CASES_API}/api/cases/${caseId}`,
+        {
+          headers: getAuthHeaders(),
+        }
       );
+
       setCaseData(response.data);
 
       let userId = "Spécialiste inconnu";
+      const token = localStorage.getItem("access_token");
 
-      try {
-        // Récupérer l'utilisateur connecté
-        const token = localStorage.getItem("access_token");
-
-        if (token) {
-          try {
-            const tokenData = JSON.parse(atob(token.split(".")[1]));
-            const email = tokenData.sub || tokenData.email || "";
-
-            userId = email || "Spécialiste inconnu";
-          } catch (error) {
-            console.error("Erreur de décodage du token:", error);
-          }
+      if (token) {
+        try {
+          const tokenData = JSON.parse(atob(token.split(".")[1]));
+          const email = tokenData.sub || tokenData.email || "";
+          userId = email || "Spécialiste inconnu";
+        } catch (error) {
+          console.error("Erreur de décodage du token:", error);
         }
-      } catch (error) {
-        console.error("Erreur lors de la récupération de l'utilisateur:", error);
       }
 
-      // Pré-remplir certaines données du rapport
       setReportData((prev) => ({
         ...prev,
         title: `Rapport d'analyse - ${response.data.id}`,
         patient_id: response.data.patient_id,
-        specialist_name: userId, 
+        specialist_name: userId,
       }));
     } catch (error) {
       console.error("Error fetching case details:", error);
+
+      if (error.response?.status === 401) {
+        toast.error("Session expirée ou non authentifiée");
+        navigate("/login");
+        return;
+      }
+
+      if (error.response?.status === 403) {
+        toast.error("Vous n'êtes pas autorisé à accéder à ce cas");
+        navigate("/dashboard");
+        return;
+      }
+
       toast.error("Erreur lors du chargement du cas");
     } finally {
       setLoading(false);
@@ -194,18 +208,18 @@ const ReportEditor = () => {
 
       // Construire le contenu du rapport
       const reportContent = `
-**Observations cliniques**
-${reportData.clinical_findings}
+        **Observations cliniques**
+        ${reportData.clinical_findings}
 
-**Diagnostic**
-${reportData.diagnosis}
+        **Diagnostic**
+        ${reportData.diagnosis}
 
-**Recommandations**
-${reportData.recommendations || "Aucune recommandation"}
+        **Recommandations**
+        ${reportData.recommendations || "Aucune recommandation"}
 
-**Conclusion**
-${reportData.conclusion || "Aucune conclusion"}
-      `.trim();
+        **Conclusion**
+        ${reportData.conclusion || "Aucune conclusion"}
+              `.trim();
 
       // Préparer les données pour l'API
       const reportPayload = {
@@ -250,15 +264,15 @@ ${reportData.conclusion || "Aucune conclusion"}
       // Si le rapport est marqué comme final, mettre à jour le workflow
       if (reportPayload.is_final) {
         try {
-          // D'abord récupérer le workflow par case_id
           const workflowResponse = await axios.get(
             `${WORKFLOW_API}/api/workflows/case/${caseId}`,
+            { headers: getAuthHeaders() }
           );
 
-          // Puis avancer le workflow avec son ID
           await axios.post(
             `${WORKFLOW_API}/api/workflows/${workflowResponse.data.id}/advance`,
             {},
+            { headers: getAuthHeaders() }
           );
           console.log("Workflow mis à jour avec succès");
         } catch (workflowError) {
