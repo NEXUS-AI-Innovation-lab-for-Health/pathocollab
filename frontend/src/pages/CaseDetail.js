@@ -23,7 +23,7 @@ import ReactMarkdown from "react-markdown";
 import jsPDF from "jspdf";
 
 import OpenSeadragonUrlViewer from "../components/OpenSeadragon/OpenSeadragonUrlViewer.tsx";
-import OrthancSeriesViewer from "../components/Orthanc/OrthancSeriesViewer.tsx";
+import CornerstoneViewer from "../components/Cornerstone/CornerstoneViewer.tsx";
 
 const CASES_API =
   process.env.REACT_APP_BACKEND_URL ||
@@ -133,7 +133,6 @@ const CaseDetail = () => {
 
   const isClosed = caseData?.status === "closed";
 
-
   const getCurrentUserRole = useCallback(() => {
     const token = localStorage.getItem("access_token");
     if (!token) return null;
@@ -159,6 +158,9 @@ const CaseDetail = () => {
     return isMedecinGeneraliste() && caseData?.status === "completed" && areAllReportsFinal;
   }, [isMedecinGeneraliste, caseData?.status, areAllReportsFinal]);
 
+  const hasRadiology = radiologySeries.length > 0;
+  const hasPathology = wsis.length > 0;
+
   const buildSafeFileName = (value) =>
     (value || "rapport_final")
       .toString()
@@ -181,7 +183,6 @@ const CaseDetail = () => {
     });
     return y;
   };
-
 
   const fetchCaseDetails = useCallback(async () => {
     try {
@@ -628,7 +629,25 @@ const CaseDetail = () => {
   useEffect(() => {
     fetchDiscussionMessages();
   }, [fetchDiscussionMessages]);
-  
+
+  useEffect(() => {
+    if (!patient?.id) return;
+
+    if (hasPathology && !hasRadiology && imageMode !== "pathology") {
+      setImageMode("pathology");
+      return;
+    }
+
+    if (hasRadiology && !hasPathology && imageMode !== "radiology") {
+      setImageMode("radiology");
+      return;
+    }
+
+    if (!hasPathology && !hasRadiology && imageMode !== "pathology") {
+      setImageMode("pathology");
+    }
+  }, [patient?.id, hasPathology, hasRadiology, imageMode]);
+
   const viewerSource = useMemo(() => {
     if (!patient?.id || !selectedWsi?.wsi_id) return null;
 
@@ -923,7 +942,7 @@ const CaseDetail = () => {
             </TabsTrigger>
             <TabsTrigger value="discussion" data-testid="tab-discussion">
               <MessageSquare className="h-4 w-4 mr-2" />
-                Discussion
+              Discussion
             </TabsTrigger>
           </TabsList>
 
@@ -1039,31 +1058,36 @@ const CaseDetail = () => {
 
               <CardContent className="space-y-4">
                 <div className="flex flex-col gap-3">
-                  <div className="flex flex-wrap items-center gap-3">
+                  <div className="flex flex-wrap items-center justify-between gap-3">
                     <div className="flex items-center gap-2">
                       <span className="text-sm text-slate-600">Patient :</span>
                       <Badge variant="outline">{patient?.full_name || patient?.id}</Badge>
                     </div>
 
                     <div className="flex items-center gap-2">
-                      {false && (
-                        <Button
-                          variant={imageMode === "pathology" ? "default" : "outline"}
-                          onClick={() => setImageMode("pathology")}
-                        >
-                          Pathologie
-                        </Button>
-                      )}
-                      {false && (
-                        <Button
-                          variant={imageMode === "radiology" ? "default" : "outline"}
-                          onClick={() => setImageMode("radiology")}
-                        >
-                          Radiologie
-                        </Button>
-                      )}
+                      <Button
+                        variant={imageMode === "pathology" ? "default" : "outline"}
+                        onClick={() => setImageMode("pathology")}
+                        disabled={!hasPathology}
+                      >
+                        Pathologie
+                      </Button>
+
+                      <Button
+                        variant={imageMode === "radiology" ? "default" : "outline"}
+                        onClick={() => setImageMode("radiology")}
+                        disabled={!hasRadiology && !patient?.id}
+                      >
+                        Radiologie
+                      </Button>
                     </div>
                   </div>
+
+                  {!hasPathology && !hasRadiology && !wsiLoading && !radiologyLoading && (
+                    <div className="text-sm text-slate-500">
+                      Aucune imagerie disponible pour ce patient pour le moment.
+                    </div>
+                  )}
 
                   {imageMode === "pathology" ? (
                     <>
@@ -1105,6 +1129,12 @@ const CaseDetail = () => {
                       {!wsiLoading && wsiError && (
                         <div className="text-sm text-red-600">
                           Impossible de charger les WSI pour ce patient.
+                        </div>
+                      )}
+
+                      {!wsiLoading && !wsiError && wsis.length === 0 && (
+                        <div className="text-sm text-slate-500">
+                          Aucune image de pathologie disponible pour ce patient.
                         </div>
                       )}
 
@@ -1207,9 +1237,15 @@ const CaseDetail = () => {
                         </div>
                       )}
 
+                      {!radiologyLoading && !radiologyError && radiologySeries.length === 0 && (
+                        <div className="text-sm text-slate-500">
+                          Aucune série radiologique disponible pour ce patient.
+                        </div>
+                      )}
+
                       <div className="border border-slate-200 rounded-lg overflow-hidden bg-white">
                         <div className="h-[70vh] min-h-[520px]">
-                          <OrthancSeriesViewer series={selectedRadiologySeries} />
+                          <CornerstoneViewer series={selectedRadiologySeries} />
                         </div>
                       </div>
                     </>

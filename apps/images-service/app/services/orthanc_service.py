@@ -1,7 +1,9 @@
 import os
-import requests
-from requests.auth import HTTPBasicAuth
 from typing import Any, Dict, Optional
+
+import requests
+from requests import Session
+from requests.auth import HTTPBasicAuth
 
 
 class OrthancService:
@@ -10,6 +12,7 @@ class OrthancService:
         self.username = os.getenv("ORTHANC_USERNAME", "orthanc")
         self.password = os.getenv("ORTHANC_PASSWORD", "orthanc")
         self.timeout = int(os.getenv("ORTHANC_TIMEOUT", "60"))
+        self.session: Session = requests.Session()
 
     def _auth(self):
         if self.username:
@@ -19,52 +22,42 @@ class OrthancService:
     def _url(self, path: str) -> str:
         return f"{self.base_url}/{path.lstrip('/')}"
 
-    def get_json(self, path: str) -> Dict[str, Any]:
+    def _request(self, method: str, path: str, **kwargs):
         url = self._url(path)
-        r = requests.get(
-            url,
+        response = self.session.request(
+            method=method,
+            url=url,
             auth=self._auth(),
-            timeout=self.timeout,
+            timeout=kwargs.pop("timeout", self.timeout),
+            **kwargs,
         )
-        if not r.ok:
-            raise RuntimeError(f"Orthanc GET {url} failed with {r.status_code}: {r.text}")
-        return r.json()
+        if not response.ok:
+            raise RuntimeError(
+                f"Orthanc {method.upper()} {url} failed with {response.status_code}: {response.text}"
+            )
+        return response
+
+    def get_json(self, path: str) -> Dict[str, Any]:
+        return self._request("GET", path).json()
 
     def get_bytes(self, path: str) -> bytes:
-        url = self._url(path)
-        r = requests.get(
-            url,
-            auth=self._auth(),
-            timeout=self.timeout,
-        )
-        if not r.ok:
-            raise RuntimeError(f"Orthanc GET {url} failed with {r.status_code}: {r.text}")
-        return r.content
+        return self._request("GET", path).content
 
     def get_stream(self, path: str):
-        url = self._url(path)
-        r = requests.get(
-            url,
-            auth=self._auth(),
-            timeout=self.timeout,
-            stream=True,
-        )
-        if not r.ok:
-            raise RuntimeError(f"Orthanc GET {url} failed with {r.status_code}: {r.text}")
-        return r
+        return self._request("GET", path, stream=True)
 
-    def post_bytes(self, path: str, data: bytes, content_type: str = "application/dicom") -> Dict[str, Any]:
-        url = self._url(path)
-        r = requests.post(
-            url,
-            auth=self._auth(),
-            timeout=self.timeout,
+    def post_bytes(
+        self,
+        path: str,
+        data: bytes,
+        content_type: str = "application/dicom",
+    ) -> Dict[str, Any]:
+        return self._request(
+            "POST",
+            path,
             data=data,
             headers={"Content-Type": content_type},
-        )
-        if not r.ok:
-            raise RuntimeError(f"Orthanc POST {url} failed with {r.status_code}: {r.text}")
-        return r.json()
+        ).json()
 
     def store_instance(self, dicom_bytes: bytes) -> Dict[str, Any]:
         return self.post_bytes("/instances", dicom_bytes, "application/dicom")
@@ -86,6 +79,25 @@ class OrthancService:
 
     def get_instance_file(self, instance_id: str):
         return self.get_stream(f"/instances/{instance_id}/file")
+
+    def get_instance_tags(self, instance_id: str, simplify: bool = True) -> Dict[str, Any]:
+        path = f"/instances/{instance_id}/tags"
+        if simplify:
+            path += "?simplify"
+        return self.get_json(path)
+
+    def get_instance_header(self, instance_id: str) -> Dict[str, Any]:
+        instance = self.get_instance(instance_id)
+        tags = self.get_instance_tags(instance_id, simplify=True)
+        return {
+            "instance_id": instance_id,
+            "parent_series": instance.get("ParentSeries"),
+            "parent_study": instance.get("ParentStudy"),
+            "parent_patient": instance.get("ParentPatient"),
+            "index_in_series": instance.get("IndexInSeries"),
+            "main_dicom_tags": instance.get("MainDicomTags", {}) or {},
+            "simplified_tags": tags or {},
+        }
 
     @staticmethod
     def extract_id_from_store_reply(reply: Dict[str, Any]) -> Optional[str]:

@@ -4,6 +4,9 @@
   "private": true,
   "dependencies": {
     "@annotorious/openseadragon": "^3.7.19",
+    "@cornerstonejs/core": "^4.21.0",
+    "@cornerstonejs/dicom-image-loader": "^4.21.0",
+    "@cornerstonejs/tools": "^4.21.0",
     "@hookform/resolvers": "^5.0.1",
     "@radix-ui/react-accordion": "^1.2.8",
     "@radix-ui/react-alert-dialog": "^1.1.11",
@@ -88,6 +91,7 @@
     "eslint-plugin-react": "7.37.4",
     "eslint-plugin-react-hooks": "5.2.0",
     "globals": "15.15.0",
+    "path-browserify": "^1.0.1",
     "postcss": "^8.4.49",
     "tailwindcss": "^3.4.17",
     "typescript": "^5.9.3"

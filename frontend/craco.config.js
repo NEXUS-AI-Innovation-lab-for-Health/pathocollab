@@ -1,4 +1,3 @@
-// craco.config.js
 const path = require("path");
 require("dotenv").config();
 
@@ -32,39 +31,67 @@ if (config.enableHealthCheck) {
 const webpackConfig = {
   webpack: {
     alias: {
-      '@': path.resolve(__dirname, 'src'),
+      "@": path.resolve(__dirname, "src"),
     },
     configure: (webpackConfig) => {
+      webpackConfig.resolve = webpackConfig.resolve || {};
+      webpackConfig.resolve.alias = {
+        ...(webpackConfig.resolve.alias || {}),
+        "@": path.resolve(__dirname, "src"),
+      };
+
+      webpackConfig.resolve.fallback = {
+        ...(webpackConfig.resolve.fallback || {}),
+        fs: false,
+        path: require.resolve("path-browserify"),
+      };
+
+      webpackConfig.experiments = {
+        ...(webpackConfig.experiments || {}),
+        asyncWebAssembly: true,
+      };
+
+      webpackConfig.module = webpackConfig.module || {};
+      webpackConfig.module.rules = webpackConfig.module.rules || [];
+
+      webpackConfig.module.rules.push({
+        test: /\.wasm$/,
+        type: "asset/resource",
+      });
+
+      // Évite le warning source map non bloquant
+      webpackConfig.ignoreWarnings = [
+        ...(webpackConfig.ignoreWarnings || []),
+        /Failed to parse source map/,
+      ];
 
       // Disable hot reload completely if environment variable is set
       if (config.disableHotReload) {
-        // Remove hot reload related plugins
-        webpackConfig.plugins = webpackConfig.plugins.filter(plugin => {
-          return !(plugin.constructor.name === 'HotModuleReplacementPlugin');
+        webpackConfig.plugins = (webpackConfig.plugins || []).filter((plugin) => {
+          return !(plugin.constructor && plugin.constructor.name === "HotModuleReplacementPlugin");
         });
 
-        // Disable watch mode
         webpackConfig.watch = false;
         webpackConfig.watchOptions = {
-          ignored: /.*/, // Ignore all files
+          ignored: /.*/,
         };
       } else {
-        // Add ignored patterns to reduce watched directories
         webpackConfig.watchOptions = {
           ...webpackConfig.watchOptions,
           ignored: [
-            '**/node_modules/**',
-            '**/.git/**',
-            '**/build/**',
-            '**/dist/**',
-            '**/coverage/**',
-            '**/public/**',
+            "**/node_modules/**",
+            "**/.git/**",
+            "**/build/**",
+            "**/dist/**",
+            "**/coverage/**",
+            "**/public/**",
           ],
         };
       }
 
       // Add health check plugin to webpack if enabled
       if (config.enableHealthCheck && healthPluginInstance) {
+        webpackConfig.plugins = webpackConfig.plugins || [];
         webpackConfig.plugins.push(healthPluginInstance);
       }
 
@@ -83,24 +110,19 @@ if (config.enableVisualEdits) {
 // Setup dev server with visual edits and/or health check
 if (config.enableVisualEdits || config.enableHealthCheck) {
   webpackConfig.devServer = (devServerConfig) => {
-    // Apply visual edits dev server setup if enabled
     if (config.enableVisualEdits && setupDevServer) {
       devServerConfig = setupDevServer(devServerConfig);
     }
 
-    // Add health check endpoints if enabled
     if (config.enableHealthCheck && setupHealthEndpoints && healthPluginInstance) {
       const originalSetupMiddlewares = devServerConfig.setupMiddlewares;
 
       devServerConfig.setupMiddlewares = (middlewares, devServer) => {
-        // Call original setup if exists
         if (originalSetupMiddlewares) {
           middlewares = originalSetupMiddlewares(middlewares, devServer);
         }
 
-        // Setup health endpoints
         setupHealthEndpoints(devServer, healthPluginInstance);
-
         return middlewares;
       };
     }

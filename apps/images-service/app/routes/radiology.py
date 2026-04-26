@@ -1,11 +1,12 @@
-from fastapi import APIRouter, Depends, UploadFile, File, HTTPException
-from fastapi.responses import StreamingResponse
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import and_, select
-from typing import List
 from datetime import datetime, timezone
 import os
 import uuid
+from typing import List
+
+from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
+from fastapi.responses import JSONResponse, StreamingResponse
+from sqlalchemy import and_, select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.radiology import RadiologySeriesLinkDB, RadiologySeriesSummary
 from app.services.minio_service import MinioService
@@ -41,12 +42,6 @@ async def upload_radiology_raw(
     patient_id: str,
     file: UploadFile = File(...),
 ):
-    """
-    Upload simple d'un DICOM dans MinIO (niveau patient).
-
-    Chemin :
-    patients/{patient_id}/radiology/raw/{uuid}_{filename}.dcm
-    """
     if not file:
         raise HTTPException(status_code=400, detail="No file provided")
 
@@ -55,23 +50,13 @@ async def upload_radiology_raw(
         raise HTTPException(status_code=400, detail="File is empty")
 
     radiology_id = str(uuid.uuid4())
-
     original_name = file.filename or "image.dcm"
     safe_name = os.path.basename(original_name)
-
     if not safe_name.lower().endswith(".dcm"):
         safe_name = f"{safe_name}.dcm"
 
-    object_name = (
-        f"patients/{patient_id}/radiology/raw/"
-        f"{radiology_id}_{safe_name}"
-    )
-
-    minio_service.upload_file(
-        content,
-        object_name,
-        file.content_type or "application/dicom",
-    )
+    object_name = f"patients/{patient_id}/radiology/raw/{radiology_id}_{safe_name}"
+    minio_service.upload_file(content, object_name, file.content_type or "application/dicom")
 
     return {
         "radiology_id": radiology_id,
@@ -89,38 +74,23 @@ async def upload_radiology_raw_batch(
     patient_id: str,
     files: List[UploadFile] = File(...),
 ):
-    """
-    Upload multiple DICOM files dans MinIO uniquement (niveau patient).
-    """
     if not files:
         raise HTTPException(status_code=400, detail="No files provided")
 
     uploaded = []
-
     for file in files:
         content = await file.read()
         if not content:
             continue
 
         radiology_id = str(uuid.uuid4())
-
         original_name = file.filename or "image.dcm"
         safe_name = os.path.basename(original_name)
-
         if not safe_name.lower().endswith(".dcm"):
             safe_name = f"{safe_name}.dcm"
 
-        object_name = (
-            f"patients/{patient_id}/radiology/raw/"
-            f"{radiology_id}_{safe_name}"
-        )
-
-        minio_service.upload_file(
-            content,
-            object_name,
-            file.content_type or "application/dicom",
-        )
-
+        object_name = f"patients/{patient_id}/radiology/raw/{radiology_id}_{safe_name}"
+        minio_service.upload_file(content, object_name, file.content_type or "application/dicom")
         uploaded.append({
             "radiology_id": radiology_id,
             "patient_id": patient_id,
@@ -157,7 +127,6 @@ async def upload_radiology_dicoms(
             continue
 
         object_id = str(uuid.uuid4())
-
         original_name = file.filename or "image.dcm"
         safe_name = os.path.basename(original_name)
         if not safe_name.lower().endswith(".dcm"):
@@ -165,33 +134,22 @@ async def upload_radiology_dicoms(
 
         minio_path = f"patients/{patient_id}/radiology/raw/{object_id}_{safe_name}"
 
-        # 1) archive brute dans MinIO
         try:
-            minio_service.upload_file(
-                content,
-                minio_path,
-                file.content_type or "application/dicom",
-            )
+            minio_service.upload_file(content, minio_path, file.content_type or "application/dicom")
         except Exception as e:
             raise HTTPException(status_code=500, detail=f"MinIO upload failed: {str(e)}")
 
-        # 2) push vers Orthanc
         try:
             store_reply = orthanc_service.store_instance(content)
-            print(f"[RADIOLOGY] store_reply={store_reply}")
         except Exception as e:
             raise HTTPException(status_code=502, detail=f"Orthanc store failed: {str(e)}")
 
         instance_id = orthanc_service.extract_id_from_store_reply(store_reply)
         if not instance_id:
-            raise HTTPException(
-                status_code=500,
-                detail=f"Unable to resolve Orthanc instance ID from reply: {store_reply}"
-            )
+            raise HTTPException(status_code=500, detail=f"Unable to resolve Orthanc instance ID from reply: {store_reply}")
 
         try:
             instance = orthanc_service.get_instance(instance_id)
-            print(f"[RADIOLOGY] instance={instance}")
         except Exception as e:
             raise HTTPException(status_code=502, detail=f"Orthanc instance fetch failed: {str(e)}")
 
@@ -207,7 +165,7 @@ async def upload_radiology_dicoms(
                     f"store_reply={store_reply}, instance={instance}"
                 ),
             )
-        
+
         try:
             series = orthanc_service.get_series(orthanc_series_id)
             study = orthanc_service.get_study(orthanc_study_id)
@@ -232,7 +190,6 @@ async def upload_radiology_dicoms(
                 )
             )
             existing = result.scalar_one_or_none()
-
             raw_prefix = f"patients/{patient_id}/radiology/raw/"
 
             if existing:
@@ -273,7 +230,6 @@ async def upload_radiology_dicoms(
 
             await db.commit()
             await db.refresh(row)
-
         except Exception as e:
             await db.rollback()
             raise HTTPException(status_code=500, detail=f"Radiology DB save failed: {str(e)}")
@@ -301,12 +257,8 @@ async def upload_radiology_dicoms(
 
 @router.get("/patients/{patient_id}/raw")
 def list_radiology_raw(patient_id: str):
-    """
-    Liste les DICOM stockés dans MinIO pour un patient.
-    """
     prefix = f"patients/{patient_id}/radiology/raw/"
     objects = minio_service.list_objects(prefix)
-
     results = []
     for obj in objects:
         object_name = obj["object_name"]
@@ -317,43 +269,33 @@ def list_radiology_raw(patient_id: str):
             "etag": obj.get("etag"),
             "url": f"/api/radiology/raw/file?object_name={object_name}",
         })
-
-    return {
-        "patient_id": patient_id,
-        "count": len(results),
-        "items": results,
-    }
+    return {"patient_id": patient_id, "count": len(results), "items": results}
 
 
 @router.get("/raw/file")
 def get_radiology_raw_file(object_name: str):
-    """
-    Stream d'un DICOM depuis MinIO
-    """
     try:
         response = minio_service.get_object(object_name)
 
         def stream():
-            for chunk in response.stream(32 * 1024):
-                yield chunk
+            try:
+                for chunk in response.stream(32 * 1024):
+                    yield chunk
+            finally:
+                response.close()
+                response.release_conn()
 
         return StreamingResponse(
             stream(),
             media_type="application/dicom",
-            headers={
-                "Content-Disposition": f'inline; filename="{os.path.basename(object_name)}"'
-            },
+            headers={"Content-Disposition": f'inline; filename="{os.path.basename(object_name)}"'},
         )
-
     except Exception as e:
         raise HTTPException(status_code=404, detail=str(e))
 
 
 @router.get("/patients/{patient_id}/series", response_model=List[RadiologySeriesSummary])
-async def list_patient_radiology_series(
-    patient_id: str,
-    db: AsyncSession = Depends(get_db_override),
-):
+async def list_patient_radiology_series(patient_id: str, db: AsyncSession = Depends(get_db_override)):
     result = await db.execute(
         select(RadiologySeriesLinkDB)
         .where(RadiologySeriesLinkDB.app_patient_id == patient_id)
@@ -369,15 +311,9 @@ def get_radiology_series_detail(orthanc_series_id: str):
         series = orthanc_service.get_series(orthanc_series_id)
         study_id = series.get("ParentStudy")
         patient_id = series.get("ParentPatient")
-
         study = orthanc_service.get_study(study_id) if study_id else {}
         patient = orthanc_service.get_patient(patient_id) if patient_id else {}
-
-        return {
-            "series": series,
-            "study": study,
-            "patient": patient,
-        }
+        return {"series": series, "study": study, "patient": patient}
     except Exception as e:
         raise HTTPException(status_code=502, detail=f"Orthanc series fetch failed: {str(e)}")
 
@@ -391,7 +327,6 @@ def list_series_instances(orthanc_series_id: str):
 
     instance_ids = series.get("Instances", []) or []
     items = []
-
     for iid in instance_ids:
         try:
             inst = orthanc_service.get_instance(iid)
@@ -405,6 +340,8 @@ def list_series_instances(orthanc_series_id: str):
                 "sop_instance_uid": tags.get("SOPInstanceUID"),
                 "preview_url": f"/api/radiology/instances/{iid}/preview",
                 "file_url": f"/api/radiology/instances/{iid}/file",
+                "metadata_url": f"/api/radiology/instances/{iid}/metadata",
+                "image_id": f"wadouri:{os.getenv('PUBLIC_IMAGES_BASE_URL', '')}/api/radiology/instances/{iid}/file",
             })
         except Exception:
             items.append({
@@ -414,6 +351,8 @@ def list_series_instances(orthanc_series_id: str):
                 "sop_instance_uid": None,
                 "preview_url": f"/api/radiology/instances/{iid}/preview",
                 "file_url": f"/api/radiology/instances/{iid}/file",
+                "metadata_url": f"/api/radiology/instances/{iid}/metadata",
+                "image_id": f"wadouri:{os.getenv('PUBLIC_IMAGES_BASE_URL', '')}/api/radiology/instances/{iid}/file",
             })
 
     def _sort_key(x):
@@ -428,12 +367,7 @@ def list_series_instances(orthanc_series_id: str):
         return (n, idx)
 
     items.sort(key=_sort_key)
-
-    return {
-        "series_id": orthanc_series_id,
-        "count": len(items),
-        "instances": items,
-    }
+    return {"series_id": orthanc_series_id, "count": len(items), "instances": items}
 
 
 @router.get("/instances/{instance_id}/preview")
@@ -476,5 +410,20 @@ def get_instance_file(instance_id: str):
     return StreamingResponse(
         iterfile(),
         media_type=media_type,
-        headers={"Content-Disposition": f'inline; filename="{instance_id}.dcm"'},
+        headers={
+            "Content-Disposition": f'inline; filename="{instance_id}.dcm"',
+            "Access-Control-Allow-Origin": "*",
+            "Access-Control-Allow-Methods": "GET, OPTIONS",
+            "Access-Control-Allow-Headers": "*",
+            "Cache-Control": "no-store",
+        },
     )
+
+
+@router.get("/instances/{instance_id}/metadata")
+def get_instance_metadata(instance_id: str):
+    try:
+        payload = orthanc_service.get_instance_header(instance_id)
+        return JSONResponse(payload, headers={"Access-Control-Allow-Origin": "*"})
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"Orthanc metadata fetch failed: {str(e)}")
