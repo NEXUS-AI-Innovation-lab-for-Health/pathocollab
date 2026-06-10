@@ -12,11 +12,6 @@ services:
     volumes:
       - postgres-data:/var/lib/postgresql/data
       - ./postgres/init-multiple-databases.sql:/docker-entrypoint-initdb.d/01-init-multiple-databases.sql
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U pixtral_user -d postgres"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
     networks:
       - pixtral-network
 
@@ -28,11 +23,6 @@ services:
       - "6379:6379"
     volumes:
       - redis-data:/data
-    healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
-      interval: 10s
-      timeout: 3s
-      retries: 5
     networks:
       - pixtral-network
 
@@ -95,9 +85,7 @@ services:
       - pixtral-network
 
   auth-service:
-    build:
-      context: ../apps/auth-service
-      dockerfile: Dockerfile
+    image: ultimatedpv4/pathocollab-auth-service:latest
     container_name: PathoCollab-auth-service
     restart: unless-stopped
     environment:
@@ -112,9 +100,7 @@ services:
       - pixtral-network
 
   cases-service:
-    build:
-      context: ../apps/cases-service
-      dockerfile: Dockerfile
+    image: ultimatedpv4/pathocollab-cases-service:latest
     container_name: PathoCollab-cases-service
     restart: unless-stopped
     environment:
@@ -129,9 +115,7 @@ services:
       - pixtral-network
 
   workflow-service:
-    build:
-      context: ../apps/workflow-service
-      dockerfile: Dockerfile
+    image: ultimatedpv4/pathocollab-workflow-service:latest
     container_name: PathoCollab-workflow-service
     restart: unless-stopped
     environment:
@@ -146,9 +130,7 @@ services:
       - pixtral-network
 
   images-service:
-    build:
-      context: ../apps/images-service
-      dockerfile: Dockerfile
+    image: ultimatedpv4/pathocollab-images-service:latest
     container_name: PathoCollab-images-service
     restart: unless-stopped
     environment:
@@ -176,9 +158,7 @@ services:
       - pixtral-network
 
   reports-service:
-    build:
-      context: ../apps/reports-service
-      dockerfile: Dockerfile
+    image: ultimatedpv4/pathocollab-reports-service:latest
     container_name: PathoCollab-reports-service
     restart: unless-stopped
     environment:
@@ -196,9 +176,7 @@ services:
       - pixtral-network
 
   instanseg-service:
-    build:
-      context: ../apps/instanseg-service
-      dockerfile: Dockerfile
+    image: ultimatedpv4/pathocollab-instanseg-service:latest
     container_name: PathoCollab-instanseg-service
     ports:
       - "8010:8010"
@@ -212,9 +190,7 @@ services:
       - pixtral-network
 
   backend-gateway:
-    build:
-      context: ../backend
-      dockerfile: Dockerfile
+    image: ultimatedpv4/pathocollab-backend-gateway:latest
     container_name: PathoCollab-backend-gateway
     restart: unless-stopped
     depends_on:
@@ -241,11 +217,6 @@ services:
       - "3306:3306"
     volumes:
       - olga-mysql-data:/var/lib/mysql
-    healthcheck:
-      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-prootpassword"]
-      interval: 10s
-      timeout: 5s
-      retries: 10
     networks:
       - pixtral-network
 
@@ -261,8 +232,7 @@ services:
       MYSQL_PASSWORD: olga_password
       FIREBASE_KEY_PATH: /app/config/apiKey.json
     depends_on:
-      olga-mysql:
-        condition: service_healthy
+      - olga-mysql
     ports:
       - "9091:9091"
     volumes:
@@ -271,9 +241,7 @@ services:
       - pixtral-network
 
   olga-designer:
-    build:
-      context: ../apps/olga-service
-      dockerfile: Dockerfile.designer
+    image: ultimatedpv4/pathocollab-olga-designer:latest
     container_name: PathoCollab-olga-designer
     restart: unless-stopped
     depends_on:
@@ -286,9 +254,7 @@ services:
       - pixtral-network
 
   olga-admin:
-    build:
-      context: ../apps/olga-service
-      dockerfile: Dockerfile.admin
+    image: ultimatedpv4/pathocollab-olga-admin:latest
     container_name: PathoCollab-olga-admin
     restart: unless-stopped
     depends_on:
