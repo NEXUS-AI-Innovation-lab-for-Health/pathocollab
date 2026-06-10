@@ -34,7 +34,10 @@ jobs:
           - name: olga-designer
             context: ./apps/olga-service
             dockerfile: Dockerfile.designer
-
+          - name: backend-gateway
+            context: ./backend
+            dockerfile: Dockerfile
+            
     steps:
       - name: Checkout
         uses: actions/checkout@v4
