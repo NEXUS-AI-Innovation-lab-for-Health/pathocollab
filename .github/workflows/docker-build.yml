@@ -28,8 +28,12 @@ jobs:
             context: ./apps/reports-service
           - name: workflow-service
             context: ./apps/workflow-service
-          - name: olga-service
+          - name: olga-admin
             context: ./apps/olga-service
+            dockerfile: Dockerfile.admin
+          - name: olga-designer
+            context: ./apps/olga-service
+            dockerfile: Dockerfile.designer
 
     steps:
       - name: Checkout
@@ -45,5 +49,6 @@ jobs:
         uses: docker/build-push-action@v6
         with:
           context: ${{ matrix.context }}
+          file: ${{ matrix.context }}/${{ matrix.dockerfile || 'Dockerfile' }}
           push: true
           tags: ${{ secrets.DOCKERHUB_USERNAME }}/pathocollab-${{ matrix.name }}:latest
