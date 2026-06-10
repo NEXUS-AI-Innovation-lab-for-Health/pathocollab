@@ -403,3 +403,31 @@ async def close_case(
         "status": case_obj.status.value if hasattr(case_obj.status, "value") else case_obj.status,
         "closed_by": payload.closed_by,
     }
+
+
+
+# Partie External Pour Intégration 
+
+@router.post("/api/external/cases")
+async def create_external_case(payload: ExternalCaseCreate):
+    patient = await create_or_get_patient(payload.patient)
+
+    case = await create_case({
+        "patient_id": patient.id,
+        "title": payload.title,
+        "description": payload.description,
+        "status": "pending",
+        "created_by": "external-oncocollab",
+        "assigned_specialists": payload.specialists_order,
+    })
+
+    await create_workflow({
+        "case_id": case.id,
+        "specialists_order": payload.specialists_order,
+    })
+
+    return {
+        "case_id": case.id,
+        "patient_id": patient.id,
+        "embed_url": f"/embed/case/{case.id}"
+    }

@@ -36,6 +36,12 @@ function App() {
               </ProtectedRoute>
             }
           />
+          <Route 
+            path="/embed/case/:caseId" 
+            element={
+              <CaseDetail embedMode />
+            } 
+          />
           <Route
             path="/cases/new"
             element={

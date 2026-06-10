@@ -60,7 +60,7 @@ const getStatusColor = (status) => {
   return colors[status] || "bg-gray-100 text-gray-800";
 };
 
-const CaseDetail = () => {
+const CaseDetail = ({ embedMode = false }) => {
   const { caseId } = useParams();
   const navigate = useNavigate();
 
@@ -98,9 +98,11 @@ const CaseDetail = () => {
   const [sendingDiscussion, setSendingDiscussion] = useState(false);
 
   const getAuthHeaders = useCallback(() => {
+    if (embedMode) return {};
+
     const token = localStorage.getItem("access_token");
     return token ? { Authorization: `Bearer ${token}` } : {};
-  }, []);
+  }, [embedMode]);
 
   const getCurrentUserId = useCallback(() => {
     const token = localStorage.getItem("access_token");
@@ -221,6 +223,11 @@ const CaseDetail = () => {
       console.error("Error fetching case details:", error);
 
       if (error.response?.status === 401) {
+        if (embedMode) {
+          toast.error("Accès embed non autorisé pour ce cas");
+          return;
+        }
+
         toast.error("Session expirée ou non authentifiée");
         navigate("/login");
         return;
@@ -883,14 +890,15 @@ const CaseDetail = () => {
       <header className="bg-white border-b border-slate-200">
         <div className="max-w-7xl mx-auto px-6 py-4">
           <div className="flex items-center gap-4">
-            <Button
-              variant="ghost"
-              size="icon"
-              onClick={() => navigate("/dashboard")}
-              data-testid="back-button"
-            >
-              <ArrowLeft className="h-5 w-5" />
-            </Button>
+            {!embedMode && (
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={() => navigate("/dashboard")}
+              >
+                <ArrowLeft className="h-5 w-5" />
+              </Button>
+            )}
 
             <div className="flex-1">
               <div className="flex items-center gap-3">
