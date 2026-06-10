@@ -5,19 +5,31 @@ on:
   push:
     branches: [ main ]
 
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
 jobs:
   build:
     runs-on: ubuntu-latest
 
     strategy:
+      fail-fast: false
       matrix:
-        service:
-          - auth-service
-          - cases-service
-          - workflow-service
-          - images-service
-          - reports-service
-          - instanseg-service
+        include:
+          - name: auth-service
+            context: ./apps/auth-service
+          - name: cases-service
+            context: ./apps/cases-service
+          - name: images-service
+            context: ./apps/images-service
+          - name: instanseg-service
+            context: ./apps/instanseg-service
+          - name: reports-service
+            context: ./apps/reports-service
+          - name: workflow-service
+            context: ./apps/workflow-service
+          - name: olga-service
+            context: ./apps/olga-service
 
     steps:
       - name: Checkout
@@ -32,6 +44,6 @@ jobs:
       - name: Build and push
         uses: docker/build-push-action@v6
         with:
-          context: ./backend/${{ matrix.service }}
+          context: ${{ matrix.context }}
           push: true
-          tags: tondockerhub/pathocollab-${{ matrix.service }}:latest
+          tags: ${{ secrets.DOCKERHUB_USERNAME }}/pathocollab-${{ matrix.name }}:latest
