@@ -8,13 +8,20 @@ logger = logging.getLogger(__name__)
 
 class AIService:
     def __init__(self):
-        self.api_key = os.getenv("EMERGENT_LLM_KEY", "sk-emergent-753468924163d5fC03")
+        self.enabled = os.getenv("AI_REPORT_ENABLED", "true").lower() == "true"
+        self.api_key = os.getenv("EMERGENT_LLM_KEY")
         self.model_provider = os.getenv("LLM_PROVIDER", "openai")
         self.model_name = os.getenv("LLM_MODEL", "gpt-4o")
     
     async def generate_report(self, case_data: dict) -> str:
         """Générer un rapport avec GPT-4o"""
         try:
+            if not self.enabled:
+                return "Assistance IA désactivée."
+
+            if not self.api_key:
+                return "Clé API IA manquante. Impossible de générer le rapport automatiquement."
+
             # Construire le contexte
             context = self._build_context(case_data)
             

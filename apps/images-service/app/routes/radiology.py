@@ -119,6 +119,12 @@ async def upload_radiology_dicoms(
     if not files:
         raise HTTPException(status_code=400, detail="No files provided")
 
+    if not orthanc_service.is_available():
+        raise HTTPException(
+            status_code=503,
+            detail="Orthanc isn't available.",
+        )
+
     uploaded = []
 
     for file in files:

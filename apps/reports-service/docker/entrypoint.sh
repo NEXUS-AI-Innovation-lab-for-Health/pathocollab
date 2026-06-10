@@ -9,7 +9,7 @@ set -eu
 
 # Optionnel : si tu utilises Qdrant dans ce service
 : "${QDRANT_URL:=http://qdrant:6333}"
-: "${WAIT_FOR_QDRANT:=true}"
+: "${WAIT_FOR_QDRANT:=false}"
 
 export DATABASE_URL QDRANT_URL
 
@@ -37,12 +37,20 @@ done
 # --- Wait Qdrant (optionnel) ---
 if [ "${WAIT_FOR_QDRANT}" = "true" ]; then
   QDRANT_HEALTH="${QDRANT_URL%/}/healthz"
-  echo "⏳ Waiting for Qdrant at ${QDRANT_HEALTH}..."
-  for i in $(seq 1 60); do
+  echo "⏳ Checking Qdrant at ${QDRANT_HEALTH}..."
+
+  QDRANT_WAIT_SECONDS="${QDRANT_WAIT_SECONDS:-10}"
+
+  for i in $(seq 1 "$QDRANT_WAIT_SECONDS"); do
     if curl -fsS "$QDRANT_HEALTH" >/dev/null 2>&1; then
       echo "✅ Qdrant is ready"
       break
     fi
+
+    if [ "$i" = "$QDRANT_WAIT_SECONDS" ]; then
+      echo "⚠️ Qdrant not ready. Starting reports-service anyway."
+    fi
+
     sleep 1
   done
 fi

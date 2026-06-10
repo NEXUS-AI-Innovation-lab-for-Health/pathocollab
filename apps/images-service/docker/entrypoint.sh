@@ -19,7 +19,7 @@ export DATABASE_URL
 export MINIO_ENDPOINT MINIO_ACCESS_KEY MINIO_SECRET_KEY
 export MINIO_BUCKET_IMAGES MINIO_BUCKET_WSI
 
-echo "🔎 images-service starting..."
+echo "   images-service starting..."
 echo "   DATABASE_URL=${DATABASE_URL}"
 echo "   MINIO_ENDPOINT=${MINIO_ENDPOINT}"
 echo "   Listening on ${SERVICE_HOST}:${SERVICE_PORT}"
@@ -42,13 +42,22 @@ done
 
 # --- Wait MinIO ---
 # (MinIO répond sur /minio/health/ready)
+# --- Wait MinIO ---
 MINIO_READY_URL="${MINIO_ENDPOINT%/}/minio/health/ready"
-echo "⏳ Waiting for MinIO at ${MINIO_READY_URL}..."
-for i in $(seq 1 60); do
+echo "⏳ Checking MinIO at ${MINIO_READY_URL}..."
+
+MINIO_WAIT_SECONDS="${MINIO_WAIT_SECONDS:-10}"
+
+for i in $(seq 1 "$MINIO_WAIT_SECONDS"); do
   if curl -fsS "$MINIO_READY_URL" >/dev/null 2>&1; then
     echo "✅ MinIO is ready"
     break
   fi
+
+  if [ "$i" = "$MINIO_WAIT_SECONDS" ]; then
+    echo "⚠️ MinIO not ready after ${MINIO_WAIT_SECONDS}s. Starting API anyway."
+  fi
+
   sleep 1
 done
 

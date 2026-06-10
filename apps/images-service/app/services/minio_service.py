@@ -23,7 +23,10 @@ class MinioService:
             secure=self.secure,
         )
 
-        self._ensure_bucket_exists()
+        self.lazy_init = os.getenv("MINIO_LAZY_INIT", "true").lower() == "true"
+
+        if not self.lazy_init:
+            self._ensure_bucket_exists()
 
     def _ensure_bucket_exists(self):
         try:
@@ -36,6 +39,8 @@ class MinioService:
     def upload_file(self, file_data: bytes, object_name: str, content_type: str):
         from io import BytesIO
         try:
+            self._ensure_bucket_exists()
+
             self.client.put_object(
                 self.bucket_name,
                 object_name,
@@ -50,6 +55,8 @@ class MinioService:
 
     def upload_path(self, file_path: str, object_name: str, content_type: str | None = None):
         try:
+            self._ensure_bucket_exists()
+            
             guessed_type, _ = mimetypes.guess_type(file_path)
             self.client.fput_object(
                 self.bucket_name,

@@ -11,7 +11,8 @@ class OrthancService:
         self.base_url = os.getenv("ORTHANC_URL", "http://orthanc:8042").rstrip("/")
         self.username = os.getenv("ORTHANC_USERNAME", "orthanc")
         self.password = os.getenv("ORTHANC_PASSWORD", "orthanc")
-        self.timeout = int(os.getenv("ORTHANC_TIMEOUT", "60"))
+        self.timeout = float(os.getenv("ORTHANC_TIMEOUT", "3"))
+        self.enabled = os.getenv("ORTHANC_ENABLED", "true").lower() == "true"
         self.session: Session = requests.Session()
 
     def _auth(self):
@@ -23,6 +24,8 @@ class OrthancService:
         return f"{self.base_url}/{path.lstrip('/')}"
 
     def _request(self, method: str, path: str, **kwargs):
+        if not self.enabled:
+            raise RuntimeError("Orthanc is disabled")
         url = self._url(path)
         response = self.session.request(
             method=method,
@@ -36,6 +39,20 @@ class OrthancService:
                 f"Orthanc {method.upper()} {url} failed with {response.status_code}: {response.text}"
             )
         return response
+    
+    def is_available(self) -> bool:
+        if not self.enabled:
+            return False
+
+        try:
+            response = self.session.get(
+                self._url("/system"),
+                auth=self._auth(),
+                timeout=2,
+            )
+            return response.ok
+        except Exception:
+            return False
 
     def get_json(self, path: str) -> Dict[str, Any]:
         return self._request("GET", path).json()

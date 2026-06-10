@@ -1,0 +1,37 @@
+name: Build and push Docker images
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ main ]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    strategy:
+      matrix:
+        service:
+          - auth-service
+          - cases-service
+          - workflow-service
+          - images-service
+          - reports-service
+          - instanseg-service
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Login Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: ./backend/${{ matrix.service }}
+          push: true
+          tags: tondockerhub/pathocollab-${{ matrix.service }}:latest

@@ -1,7 +1,7 @@
 # app/main.py
 from fastapi import FastAPI, Header, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from app.routes import images, annotations, wsi, debug_browser, debug_wsi_dzi, radiology
+from app.routes import images, annotations, wsi, radiology
 from app.utils.database import get_db
 from app.models.base import Base
 from app.models.image import ImageDB
@@ -98,8 +98,6 @@ async def startup():
 app.include_router(images.router, prefix="/api")
 app.include_router(annotations.router, prefix="/api")
 app.include_router(wsi.router, prefix="/api")
-app.include_router(debug_browser.router, prefix="/api")
-app.include_router(debug_wsi_dzi.router, prefix="/api")
 app.include_router(radiology.router, prefix="/api")
 
 @app.get("/health")

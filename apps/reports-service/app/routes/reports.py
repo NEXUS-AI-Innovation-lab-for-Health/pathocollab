@@ -20,13 +20,15 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/reports", tags=["Reports"])
 
 CASES_SERVICE_URL = os.getenv("CASES_SERVICE_URL", "http://cases-service:8002")
-
+CASES_SYNC_ENABLED = os.getenv("CASES_SYNC_ENABLED", "true").lower() == "true"
 
 async def _sync_case_completion(case_id: str) -> None:
-    async with httpx.AsyncClient(timeout=10.0) as client:
+    if not CASES_SYNC_ENABLED:
+        return
+
+    async with httpx.AsyncClient(timeout=3.0) as client:
         response = await client.post(f"{CASES_SERVICE_URL}/api/cases/{case_id}/sync-completion")
         response.raise_for_status()
-
 
 async def _sync_case_completion_if_final(is_final: bool, case_id: str) -> None:
     if not is_final:
