@@ -92,24 +92,3 @@ class ExternalCaseCreate(BaseModel):
     specialists_order: Optional[List[str]] = None
 
     metadata: Dict[str, Any] = Field(default_factory=dict)
-
-
-class ExternalPatientPayload(BaseModel):
-    id: Optional[str] = None
-    full_name: str
-    age: int
-    gender: str
-    date_of_birth: Optional[str] = None
-    medical_history: Optional[str] = ""
-    symptoms: Optional[str] = ""
-    imaging_notes: Optional[str] = ""
-
-
-class ExternalCaseCreate(BaseModel):
-    source: Optional[str] = "external"
-    external_reference: Optional[str] = None
-    patient: ExternalPatientPayload
-    title: str
-    description: Optional[str] = ""
-    specialists_order: List[str] = Field(default_factory=list)
-    metadata: Dict[str, Any] = Field(default_factory=dict)

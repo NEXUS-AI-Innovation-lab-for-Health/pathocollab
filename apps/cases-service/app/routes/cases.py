@@ -413,6 +413,27 @@ from pydantic import BaseModel, Field
 from app.models.patient import PatientDB
 
 
+class ExternalPatientPayload(BaseModel):
+    id: Optional[str] = None
+    full_name: str
+    age: int
+    gender: str
+    date_of_birth: Optional[str] = None
+    medical_history: Optional[str] = ""
+    symptoms: Optional[str] = ""
+    imaging_notes: Optional[str] = ""
+
+
+class ExternalCaseCreate(BaseModel):
+    source: Optional[str] = "external"
+    external_reference: Optional[str] = None
+    patient: ExternalPatientPayload
+    title: str
+    description: Optional[str] = ""
+    specialists_order: List[str] = Field(default_factory=list)
+    metadata: Dict[str, Any] = Field(default_factory=dict)
+
+
 @router.post("/external", status_code=status.HTTP_201_CREATED)
 async def create_external_case(
     payload: ExternalCaseCreate,
