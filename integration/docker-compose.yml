@@ -12,6 +12,21 @@ services:
     ports:
       - "8000:8000"
 
+  postgres:
+    image: postgres:16
+    container_name: PathoCollab-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: pixtral_user
+      POSTGRES_PASSWORD: pixtral_pass
+      POSTGRES_DB: postgres
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    networks:
+      - pathocollab-network
+
   cases-service:
     image: ultimatedpv4/pathocollab-cases-service:latest
     ports:
@@ -80,3 +95,13 @@ services:
       "
     networks:
       - pathocollab-network
+
+volumes:
+  postgres-data:
+  redis-data:
+  minio-data:
+  qdrant-data:
+
+networks:
+  pathocollab-network:
+    driver: bridge
