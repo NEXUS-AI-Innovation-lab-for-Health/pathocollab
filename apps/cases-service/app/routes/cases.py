@@ -1,8 +1,8 @@
 from fastapi import APIRouter, Depends, HTTPException, status, Header
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
-from typing import List
-from pydantic import BaseModel
+from typing import Optional, List, Dict, Any
+from pydantic import BaseModel, Field
 
 from app.models.case import Case, CaseCreate, CaseDB, CaseStatus
 from app.utils.database import get_db
@@ -408,26 +408,51 @@ async def close_case(
 
 # Partie External Pour Intégration 
 
-@router.post("/api/external/cases")
-async def create_external_case(payload: ExternalCaseCreate):
-    patient = await create_or_get_patient(payload.patient)
+from typing import List, Optional, Dict, Any
+from pydantic import BaseModel, Field
+from app.models.patient import PatientDB
 
-    case = await create_case({
-        "patient_id": patient.id,
-        "title": payload.title,
-        "description": payload.description,
-        "status": "pending",
-        "created_by": "external-oncocollab",
-        "assigned_specialists": payload.specialists_order,
-    })
 
-    await create_workflow({
-        "case_id": case.id,
-        "specialists_order": payload.specialists_order,
-    })
+@router.post("/external", status_code=status.HTTP_201_CREATED)
+async def create_external_case(
+    payload: ExternalCaseCreate,
+    db: AsyncSession = Depends(get_db),
+):
+    patient_id = payload.patient.id or f"PAT-EXT-{datetime.now().timestamp()}"
+
+    result = await db.execute(select(PatientDB).where(PatientDB.id == patient_id))
+    patient = result.scalar_one_or_none()
+
+    if not patient:
+        patient = PatientDB(
+            id=patient_id,
+            full_name=payload.patient.full_name,
+            age=payload.patient.age,
+            gender=payload.patient.gender,
+            date_of_birth=payload.patient.date_of_birth,
+            medical_history=payload.patient.medical_history,
+            symptoms=payload.patient.symptoms,
+            imaging_notes=payload.patient.imaging_notes,
+        )
+        db.add(patient)
+        await db.flush()
+
+    db_case = CaseDB(
+        patient_id=patient.id,
+        title=payload.title,
+        description=payload.description,
+        status=CaseStatus.PENDING,
+        created_by=payload.source or "external",
+        assigned_specialists=payload.specialists_order,
+    )
+
+    db.add(db_case)
+    await db.commit()
+    await db.refresh(db_case)
 
     return {
-        "case_id": case.id,
+        "case_id": db_case.id,
         "patient_id": patient.id,
-        "embed_url": f"/embed/case/{case.id}"
+        "embed_url": f"/embed/case/{db_case.id}",
+        "status": "created",
     }
