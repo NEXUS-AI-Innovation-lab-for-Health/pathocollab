@@ -130,10 +130,7 @@ services:
       - pixtral-network
 
   images-service:
-    build:
-      context: ../apps/images-service
-      dockerfile: Dockerfile
-    image: pathocollab-images-service:local
+    image: ultimatedpv4/pathocollab-images-service:latest
     container_name: PathoCollab-images-service
     restart: unless-stopped
     environment:
@@ -163,7 +160,7 @@ services:
       - "8004:8004"
     networks:
       - pixtral-network
-      
+
   reports-service:
     image: ultimatedpv4/pathocollab-reports-service:latest
     container_name: PathoCollab-reports-service
