@@ -14,7 +14,7 @@ type PathoCollabPatientImageViewerProps = {
 
 export default function PathoCollabPatientImageViewer({
   patientId,
-  imagesApiBaseUrl = "http://localhost:8004",
+  imagesApiBaseUrl = "http://localhost:18004",
   height = "600px",
 }: PathoCollabPatientImageViewerProps) {
   const [wsis, setWsis] = useState<WsiItem[]>([]);
@@ -27,6 +27,10 @@ export default function PathoCollabPatientImageViewer({
     [patientId]
   );
 
+  function joinUrl(baseUrl: string, path: string) {
+    return `${baseUrl.replace(/\/+$/, "")}/${path.replace(/^\/+/, "")}`;
+  }
+
   useEffect(() => {
     if (!patientId) return;
 
@@ -36,7 +40,10 @@ export default function PathoCollabPatientImageViewer({
         setError(null);
 
         const response = await fetch(
-          `${imagesApiBaseUrl}/api/debug/wsi-dzi?patient_id=${encodeURIComponent(patientId)}`
+          joinUrl(
+            imagesApiBaseUrl,
+            `/api/wsi/patients/${encodeURIComponent(patientId)}/wsis`
+          )
         );
 
         if (!response.ok) {
@@ -67,13 +74,14 @@ export default function PathoCollabPatientImageViewer({
   useEffect(() => {
     if (!patientId || !selectedWsiId) return;
 
-    const dziUrl = `${imagesApiBaseUrl}/api/wsi/patients/${encodeURIComponent(
-      patientId
-    )}/${encodeURIComponent(selectedWsiId)}/dzi`;
+    const dziUrl = joinUrl(
+      imagesApiBaseUrl,
+      `/api/wsi/patients/${encodeURIComponent(patientId)}/${encodeURIComponent(selectedWsiId)}/dzi`
+    );
 
     const viewer = OpenSeadragon({
       id: viewerId,
-      prefixUrl: "http://localhost:8004/api/wsi/openseadragon-images/",
+      prefixUrl: "${imagesApiBaseUrl}/api/wsi/openseadragon-images/",
       tileSources: dziUrl,
       showNavigator: true,
       showRotationControl: true,

@@ -65,6 +65,35 @@ async def _upload_tile_batch(tile_files: List[Tuple[str, str]], patient_id: str,
     await asyncio.gather(*(upload_one(local, rel) for local, rel in tile_files))
 
 
+@router.get("/patients/{patient_id}/wsis")
+def list_patient_wsis(patient_id: str):
+    prefix = f"patients/{patient_id}/dzi/"
+    prefixes = minio.list_prefixes(prefix)
+
+    wsis = []
+
+    for p in prefixes:
+        parts = p.rstrip("/").split("/")
+        if len(parts) < 4:
+            continue
+
+        wsi_id = parts[-1]
+        dzi_object = f"patients/{patient_id}/dzi/{wsi_id}/slide.dzi"
+
+        if minio.object_exists(dzi_object):
+            wsis.append({
+                "wsi_id": wsi_id,
+                "filename": f"WSI {wsi_id}",
+                "dzi_url": f"/api/wsi/patients/{patient_id}/{wsi_id}/dzi"
+            })
+
+    return {
+        "patient_id": patient_id,
+        "count": len(wsis),
+        "wsis": wsis
+    }
+
+
 @router.post("/{wsi_id}/convert-dzi", status_code=202)
 async def convert_wsi_to_dzi(
     wsi_id: str,
