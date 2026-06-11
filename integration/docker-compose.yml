@@ -4,7 +4,6 @@ services:
     image: ultimatedpv4/pathocollab-backend-gateway:latest
 
     environment:
-      AUTH_SERVICE_URL: http://auth-service:8001
       CASES_SERVICE_URL: http://cases-service:8002
       WORKFLOW_SERVICE_URL: http://workflow-service:8003
       IMAGES_SERVICE_URL: http://images-service:8004
@@ -13,17 +12,71 @@ services:
     ports:
       - "8000:8000"
 
-  auth-service:
-    image: ultimatedpv4/pathocollab-auth-service:latest
-
   cases-service:
     image: ultimatedpv4/pathocollab-cases-service:latest
+    ports:
+      - "8002:8002"
 
   workflow-service:
     image: ultimatedpv4/pathocollab-workflow-service:latest
+    ports:
+      - "8003:8003"
 
   images-service:
     image: ultimatedpv4/pathocollab-images-service:latest
+    container_name: PathoCollab-images-service
+    restart: unless-stopped
+    environment:
+      SERVICE_PORT: "8004"
+      DATABASE_URL: postgresql+asyncpg://pixtral_user:pixtral_pass@postgres:5432/images_db
+      ALEMBIC_DATABASE_URL: postgresql+psycopg2://pixtral_user:pixtral_pass@postgres:5432/images_db
+      MINIO_ENDPOINT: minio:9000
+      MINIO_ACCESS_KEY: minioadmin
+      MINIO_SECRET_KEY: minioadmin
+      MINIO_BUCKET_NAME: pixtral-wsi-images
+      MINIO_BUCKET_IMAGES: pixtral-images
+      MINIO_BUCKET_WSI: pixtral-wsi-images
+      INSTANTSEG_ENABLED: "false"
+    depends_on:
+      - postgres
+      - minio
+      - minio-init
+    ports:
+      - "8004:8004"
+    networks:
+      - pathocollab-network
 
   reports-service:
     image: ultimatedpv4/pathocollab-reports-service:latest
+    ports:
+      - "8005:8005"
+
+  minio:
+    image: minio/minio:latest
+    container_name: PathoCollab-minio
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    volumes:
+      - minio-data:/data
+    networks:
+      - pathocollab-network
+
+  minio-init:
+    image: minio/mc:latest
+    depends_on:
+      - minio
+    entrypoint: >
+      /bin/sh -c "
+      sleep 5;
+      mc alias set local http://minio:9000 minioadmin minioadmin;
+      mc mb --ignore-existing local/pixtral-images;
+      mc mb --ignore-existing local/pixtral-wsi-images;
+      exit 0;
+      "
+    networks:
+      - pathocollab-network
