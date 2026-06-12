@@ -58,6 +58,8 @@ export type OpenSeadragonUrlViewerProps = {
   imageKey?: string | null;
   imageId?: string | null;
   caseId?: string | null;
+  currentUserId?: string;
+  apiBaseUrl?: string;
 };
 
 type DragRefState = (RectDragState | CircleDragState) & {
@@ -155,7 +157,7 @@ function getInstantSegPersistedAnnotations(list: Annotation[]) {
 export default function OpenSeadragonUrlViewer(
   props: OpenSeadragonUrlViewerProps,
 ) {
-  const { sourceType, sourceUrl, imageKey, imageId, caseId } = props;
+  const { sourceType, sourceUrl, imageKey, imageId, caseId, currentUserId, apiBaseUrl } = props;
 
   type AnnSource = BaseAnnotation["_source"];
 

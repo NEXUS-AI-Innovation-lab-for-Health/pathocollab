@@ -19,6 +19,7 @@ type PathoCollabExternalCaseDetailProps = {
   caseId: string;
   apiBaseUrls?: ApiBaseUrls;
   currentUserId?: string;
+  patientLabel?: string;
 };
 
 const defaultApiBaseUrls: Required<ApiBaseUrls> = {
@@ -67,10 +68,40 @@ function statusLabel(status?: string) {
   return status ? labels[status] || status : "-";
 }
 
+function resolvePatientId(caseData: any, patient: any = null, patientLabel?: string) {
+  const value =
+    caseData?.patient_id ||
+    caseData?.patient_number ||
+    caseData?.patientId ||
+    caseData?.patient?.id ||
+    caseData?.patient?.patient_id ||
+    patient?.id ||
+    patient?.patient_id ||
+    patientLabel ||
+    "";
+
+  if (!value || String(value).trim() === "undefined" || String(value).trim() === "null") {
+    return "";
+  }
+
+  return String(value).trim();
+}
+
+function getPatientDisplayName(patient: any, patientId: string) {
+  return (
+    patient?.full_name ||
+    patient?.name ||
+    [patient?.firstname, patient?.lastname].filter(Boolean).join(" ") ||
+    patientId ||
+    "Patient non défini"
+  );
+}
+
 export default function PathoCollabExternalCaseDetail({
   caseId,
   apiBaseUrls,
   currentUserId = "external-user",
+  patientLabel
 }: PathoCollabExternalCaseDetailProps) {
   const api = { ...defaultApiBaseUrls, ...(apiBaseUrls || {}) };
 
@@ -124,7 +155,7 @@ export default function PathoCollabExternalCaseDetail({
     } finally {
       setLoading(false);
     }
-  }, [api.cases, api.workflow, caseId]);
+  }, [api.cases, api.workflow, caseId, patientLabel]);
 
   const fetchWsis = useCallback(async (patientId: string) => {
     try {
@@ -159,6 +190,16 @@ export default function PathoCollabExternalCaseDetail({
       setMessages([]);
     }
   }, [api.cases, caseId]);
+
+  const resolvedPatientId = useMemo(
+    () => resolvePatientId(caseData, patient, patientLabel),
+    [caseData, patient, patientLabel]
+  );
+
+  const patientDisplayName = useMemo(
+    () => getPatientDisplayName(patient, resolvedPatientId),
+    [patient, resolvedPatientId]
+  );
 
   useEffect(() => {
     fetchCase();
@@ -209,6 +250,7 @@ export default function PathoCollabExternalCaseDetail({
       setSendingMessage(true);
       const res = await axios.post(joinUrl(api.cases, `/api/discussions/external/case/${encodeURIComponent(caseId)}`), {
         author: currentUserId,
+        message: content,
         content,
       });
       setMessages((prev) => [...prev, res.data]);
@@ -269,7 +311,8 @@ export default function PathoCollabExternalCaseDetail({
         <section style={cardStyle}>
           <h3>Informations du cas</h3>
           <Info label="Cas" value={caseData.id} />
-          <Info label="Patient" value={patient?.full_name || caseData.patient_id} />
+          <Info label="Patient" value={patientDisplayName} />
+          <Info label="ID patient" value={resolvedPatientId || "-"} />
           <Info label="Description" value={caseData.description || "Aucune description"} />
           <Info label="Créé par" value={caseData.created_by || "external"} />
           {patient && (
@@ -286,7 +329,7 @@ export default function PathoCollabExternalCaseDetail({
       {activeTab === "images" && (
         <section style={cardStyle}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
-            <h3 style={{ margin: 0 }}>Images du patient</h3>
+            <h3 style={{ margin: 0 }}>Images du patient {resolvedPatientId ? `(${resolvedPatientId})` : ""}</h3>
             <select
               disabled={wsiLoading || wsis.length === 0}
               value={selectedWsi?.wsi_id || ""}
@@ -306,7 +349,7 @@ export default function PathoCollabExternalCaseDetail({
               <OpenSeadragonUrlViewer
                 sourceType="dzi"
                 sourceUrl={viewerSource}
-                imageKey={`${caseData.patient_id}:${selectedWsi?.wsi_id}`}
+                imageKey={`${resolvedPatientId}:${selectedWsi?.wsi_id}`}
                 imageId={selectedWsi?.wsi_id}
                 caseId={caseId}
                 currentUserId={currentUserId}
@@ -357,8 +400,8 @@ export default function PathoCollabExternalCaseDetail({
           <div style={{ height: 300, overflow: "auto", border: "1px solid #e5e7eb", borderRadius: 10, padding: 12, marginBottom: 12 }}>
             {messages.length === 0 ? <p>Aucun message.</p> : messages.map((m) => (
               <div key={m.id || `${m.user_id}-${m.created_at}`} style={{ marginBottom: 10 }}>
-                <strong>{m.user_id || "Utilisateur"}</strong>
-                <p style={{ margin: "4px 0", whiteSpace: "pre-wrap" }}>{m.content}</p>
+                <strong>{m.user_id || m.author || "Utilisateur"}</strong>
+                <p style={{ margin: "4px 0", whiteSpace: "pre-wrap" }}>{m.content || m.message}</p>
               </div>
             ))}
           </div>
