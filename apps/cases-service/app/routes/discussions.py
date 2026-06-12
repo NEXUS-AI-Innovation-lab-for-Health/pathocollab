@@ -157,3 +157,59 @@ async def delete_message(
     await db.commit()
 
     return {"detail": "Message deleted", "id": message_id}
+
+
+from pydantic import BaseModel
+
+class ExternalDiscussionCreate(BaseModel):
+    author: str
+    message: str
+
+
+@router.post("/external/case/{case_id}")
+async def create_external_discussion(
+    case_id: str,
+    payload: ExternalDiscussionCreate,
+    db: AsyncSession = Depends(get_db),
+):
+    discussion = DiscussionMessageDB(
+        case_id=case_id,
+        author_name=payload.author,
+        message=payload.message,
+    )
+
+    db.add(discussion)
+
+    await db.commit()
+    await db.refresh(discussion)
+
+    return {
+        "id": str(discussion.id),
+        "status": "created",
+    }
+
+
+@router.get("/external/case/{case_id}")
+async def get_external_discussion(
+    case_id: str,
+    db: AsyncSession = Depends(get_db),
+):
+    result = await db.execute(
+        select(DiscussionMessageDB)
+        .where(DiscussionMessageDB.case_id == case_id)
+        .order_by(DiscussionMessageDB.created_at.asc())
+    )
+
+    messages = result.scalars().all()
+
+    return [
+        {
+            "id": str(msg.id),
+            "case_id": msg.case_id,
+            "author": msg.author_name,
+            "role": msg.author_role,
+            "message": msg.message,
+            "created_at": msg.created_at.isoformat(),
+        }
+        for msg in messages
+    ]

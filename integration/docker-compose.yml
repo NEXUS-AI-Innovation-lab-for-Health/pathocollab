@@ -94,6 +94,25 @@ services:
       - qdrant-data:/qdrant/storage
     networks:
       - pathocollab-network
+    
+  instanseg-service:
+    image: ultimatedpv4/pathocollab-instanseg-service:latest
+    platform: linux/amd64
+    restart: unless-stopped
+
+    environment:
+      IMAGES_INTERNAL_HOST: images-service
+      IMAGES_INTERNAL_PORT: "8004"
+
+    depends_on:
+      images-service:
+        condition: service_started
+
+    ports:
+      - "18010:8010"
+
+    networks:
+      - pathocollab-network
 
   auth-service:
     image: ultimatedpv4/pathocollab-auth-service:latest
@@ -172,7 +191,8 @@ services:
       MINIO_SECURE: "false"
       MINIO_LAZY_INIT: "true"
       ORTHANC_ENABLED: "false"
-      INSTANTSEG_ENABLED: "false"
+      INSTANTSEG_ENABLED: "true"
+      INSTANTSEG_URL: http://instanseg-service:8010
       PUBLIC_IMAGES_BASE_URL: http://localhost:18004
     depends_on:
       postgres:

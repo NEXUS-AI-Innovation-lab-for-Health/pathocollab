@@ -477,3 +477,17 @@ async def create_external_case(
         "embed_url": f"/embed/case/{db_case.id}",
         "status": "created",
     }
+
+
+@router.get("/external/{case_id}")
+async def get_external_case(
+    case_id: str,
+    db: AsyncSession = Depends(get_db),
+):
+    result = await db.execute(select(CaseDB).where(CaseDB.id == case_id))
+    db_case = result.scalar_one_or_none()
+
+    if not db_case:
+        raise HTTPException(status_code=404, detail="Case not found")
+
+    return db_case
