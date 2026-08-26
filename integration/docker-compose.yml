@@ -231,6 +231,43 @@ services:
     networks:
       - pathocollab-network
 
+  olga-mysql:
+    image: mysql:8.0
+    container_name: PathoCollab-olga-mysql
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: rootpassword
+      MYSQL_DATABASE: olga
+      MYSQL_USER: olga_user
+      MYSQL_PASSWORD: olga_password
+    ports:
+      - "13306:3306"
+    volumes:
+      - olga-mysql-data:/var/lib/mysql
+    networks:
+      - pathocollab-network
+
+  olga-api:
+    image: kirito140/olga-backend:latest
+    platform: linux/amd64
+    container_name: PathoCollab-olga-api
+    restart: unless-stopped
+    environment:
+      ADDRESS: 0.0.0.0
+      PORT: 9091
+      MYSQL_URL: jdbc:mysql://olga-mysql:3306/olga
+      MYSQL_USERNAME: olga_user
+      MYSQL_PASSWORD: olga_password
+      FIREBASE_KEY_PATH: /app/config/apiKey.json
+    depends_on:
+      - olga-mysql
+    ports:
+      - "8082:9091"
+    volumes:
+      - ./olga-config/apiKey.json:/app/config/apiKey.json:ro
+    networks:
+      - pathocollab-network
+
   backend-gateway:
     image: ultimatedpv4/pathocollab-backend-gateway:latest
     platform: linux/amd64
@@ -262,6 +299,7 @@ volumes:
   redis-data:
   minio-data:
   qdrant-data:
+  olga-mysql-data:
 
 networks:
   pathocollab-network:

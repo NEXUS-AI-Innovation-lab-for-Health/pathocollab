@@ -18,5 +18,10 @@
   "packageManager": "yarn@1.22.22",
   "engines": {
     "node": ">=18.0.0"
+  },
+  "dependencies": {
+    "@cornerstonejs/core": "^5.8.2",
+    "@cornerstonejs/dicom-image-loader": "^5.8.2",
+    "@cornerstonejs/tools": "^5.8.2"
   }
 }

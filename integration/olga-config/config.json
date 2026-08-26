@@ -1,0 +1,15 @@
+{
+    "DEV": {
+        "label": "Développement Local",
+        "firebaseOptions": {
+            "apiKey": "AIzaSyDOSruVfk09V_N_sU6cY_ltXcznXZBuspg",
+            "authDomain": "workflowsae.firebaseapp.com",
+            "projectId": "workflowsae",
+            "storageBucket": "workflowsae.firebasestorage.app",
+            "messagingSenderId": "552984531664",
+            "appId": "1:552984531664:web:2e917713d0a5139177c4d5",
+            "measurementId": "G-S3TLJMG858"
+        },
+        "apiBaseUrl": "http://localhost:8082/"
+    }
+}
