@@ -562,16 +562,23 @@ const CaseDetail = ({ embedMode = false }) => {
         setSelectedWsi(null);
 
         const res = await axios.get(
-          `${IMAGES_API}/api/debug/wsi-dzi?patient_id=${encodeURIComponent(patientId)}`,
-          { headers: getAuthHeaders() }
+          `${IMAGES_API}/api/wsi/patients/${encodeURIComponent(patientId)}/wsis`,
+          {
+            headers: getAuthHeaders(),
+          }
         );
 
-        const list = res.data?.wsis || res.data?.slides || [];
+        const list = Array.isArray(res.data?.wsis)
+          ? res.data.wsis
+          : [];
+
+        console.log("WSI trouvées :", list);
+
         setWsis(list);
         setSelectedWsi(list.length > 0 ? list[0] : null);
-      } catch (e) {
-        console.error("Error loading WSI/DZI:", e);
-        setWsiError(e);
+      } catch (error) {
+        console.error("Error loading WSI:", error);
+        setWsiError(error);
         setWsis([]);
         setSelectedWsi(null);
       } finally {

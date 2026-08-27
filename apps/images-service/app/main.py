@@ -1,7 +1,7 @@
 # app/main.py
 from fastapi import FastAPI, Header, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from app.routes import images, annotations, wsi, radiology
+from app.routes import annotations, wsi, radiology
 from app.utils.database import get_db
 from app.models.base import Base
 from app.models.image import ImageDB
@@ -79,7 +79,6 @@ def get_current_user_from_bearer(authorization: str = Header(default=None)):
     except Exception as e:
         raise HTTPException(status_code=401, detail=f"Invalid bearer token: {str(e)}")
 
-app.dependency_overrides[images.get_db_override] = get_db
 app.dependency_overrides[radiology.get_db_override] = get_db
 app.dependency_overrides[annotations.get_db_override] = get_db
 app.dependency_overrides[annotations.get_current_user_override] = get_current_user_from_bearer
@@ -90,7 +89,6 @@ async def startup():
         await conn.run_sync(Base.metadata.create_all)
     logger.info("Database tables checked/created")
 
-app.include_router(images.router, prefix="/api")
 app.include_router(annotations.router, prefix="/api")
 app.include_router(wsi.router, prefix="/api")
 app.include_router(radiology.router, prefix="/api")

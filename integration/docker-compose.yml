@@ -143,6 +143,7 @@ services:
       ALEMBIC_DATABASE_URL: postgresql+psycopg2://pixtral_user:pixtral_pass@postgres:5432/cases_db
       REPORTS_SERVICE_URL: http://reports-service:8005
       WORKFLOW_SERVICE_URL: http://workflow-service:8003
+      EXTERNAL_SERVICE_USERS: oncocollab-service@hospital.fr
     depends_on:
       postgres:
         condition: service_healthy

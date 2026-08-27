@@ -53,6 +53,46 @@ const TOOL_GROUP_ID = "radiology-stack-tool-group";
 const RENDERING_ENGINE_ID = "radiology-stack-engine";
 const VIEWPORT_ID = "radiology-stack-viewport";
 
+let cornerstoneInitializationPromise: Promise<any> | null = null;
+
+async function initializeCornerstoneOnce() {
+  if (cornerstoneInitializationPromise) {
+    return cornerstoneInitializationPromise;
+  }
+
+  cornerstoneInitializationPromise = (async () => {
+    const core = await import("@cornerstonejs/core");
+    const dicomImageLoader = await import(
+      "@cornerstonejs/dicom-image-loader"
+    );
+    const csTools = await import("@cornerstonejs/tools");
+
+    const cornerstone = core as any;
+    const loader = dicomImageLoader as any;
+    const tools = csTools as any;
+
+    if (typeof cornerstone.init === "function") {
+      await cornerstone.init();
+    }
+
+    if (typeof tools.init === "function") {
+      await tools.init();
+    }
+
+    loader.init({
+      maxWebWorkers: navigator.hardwareConcurrency || 4,
+    });
+
+    return {
+      cornerstone,
+      loader,
+      tools,
+    };
+  })();
+
+  return cornerstoneInitializationPromise;
+}
+
 export default function CornerstoneViewer({ series }: Props) {
   const [instances, setInstances] = useState<SeriesInstance[]>([]);
   const [loading, setLoading] = useState(false);
@@ -115,15 +155,10 @@ export default function CornerstoneViewer({ series }: Props) {
 
     (async () => {
       try {
-        const core = await import("@cornerstonejs/core");
-        const dicomImageLoader = await import("@cornerstonejs/dicom-image-loader");
-        const csTools = await import("@cornerstonejs/tools");
-
-        const cornerstone = core as any;
-        const loader = dicomImageLoader as any;
-        const tools = csTools as any;
-
-        loader.init();
+        const {
+          cornerstone,
+          tools,
+        } = await initializeCornerstoneOnce();
 
         const {
           addTool,
@@ -133,20 +168,29 @@ export default function CornerstoneViewer({ series }: Props) {
           LengthTool,
           RectangleROITool,
           EllipticalROITool,
-          StackScrollMouseWheelTool,
           ToolGroupManager,
         } = tools;
 
-        const { imageLoader } = cornerstone;
-
-        if (loader?.wadouri?.loadImage) {
-          imageLoader.registerImageLoader("wadouri", loader.wadouri.loadImage);
-        }
+        /*
+        * Le nom du tool de scroll dépend des versions de Cornerstone.
+        */
+        const StackScrollTool =
+          tools.StackScrollMouseWheelTool ||
+          tools.StackScrollTool ||
+          null;
 
         const safeAddTool = (toolClass: any) => {
+          if (!toolClass) return;
+
           try {
             addTool(toolClass);
-          } catch {}
+          } catch (err) {
+            // peut déjà être enregistré
+            console.debug(
+              "Tool déjà enregistré :",
+              toolClass?.toolName
+            );
+          }
         };
 
         safeAddTool(PanTool);
@@ -155,40 +199,55 @@ export default function CornerstoneViewer({ series }: Props) {
         safeAddTool(LengthTool);
         safeAddTool(RectangleROITool);
         safeAddTool(EllipticalROITool);
-        safeAddTool(StackScrollMouseWheelTool);
 
-        let toolGroup = ToolGroupManager.getToolGroup(TOOL_GROUP_ID);
-        if (!toolGroup) {
-          toolGroup = ToolGroupManager.createToolGroup(TOOL_GROUP_ID);
+        if (StackScrollTool) {
+          safeAddTool(StackScrollTool);
         }
 
-        [
-          PanTool.toolName,
-          ZoomTool.toolName,
-          WindowLevelTool.toolName,
-          LengthTool.toolName,
-          RectangleROITool.toolName,
-          EllipticalROITool.toolName,
-          StackScrollMouseWheelTool.toolName,
-        ].forEach((toolName) => {
+        let toolGroup =
+          ToolGroupManager.getToolGroup(TOOL_GROUP_ID);
+
+        if (!toolGroup) {
+          toolGroup =
+            ToolGroupManager.createToolGroup(TOOL_GROUP_ID);
+        }
+
+        const toolClasses = [
+          PanTool,
+          ZoomTool,
+          WindowLevelTool,
+          LengthTool,
+          RectangleROITool,
+          EllipticalROITool,
+          StackScrollTool,
+        ].filter(Boolean);
+
+        toolClasses.forEach((toolClass: any) => {
+          if (!toolClass?.toolName) return;
+
           try {
-            toolGroup.addTool(toolName);
-          } catch {}
+            toolGroup.addTool(toolClass.toolName);
+          } catch {
+            // déjà présent dans le groupe
+          }
         });
 
         runtimeRef.current = {
           cornerstone,
           csTools: tools,
           toolGroup,
+
           toolNames: {
-            pan: PanTool.toolName,
-            zoom: ZoomTool.toolName,
-            windowLevel: WindowLevelTool.toolName,
-            length: LengthTool.toolName,
-            rectangleRoi: RectangleROITool.toolName,
-            ellipticalRoi: EllipticalROITool.toolName,
-            stackScrollMouseWheel: StackScrollMouseWheelTool.toolName,
+            pan: PanTool?.toolName,
+            zoom: ZoomTool?.toolName,
+            windowLevel: WindowLevelTool?.toolName,
+            length: LengthTool?.toolName,
+            rectangleRoi: RectangleROITool?.toolName,
+            ellipticalRoi: EllipticalROITool?.toolName,
+            stackScrollMouseWheel:
+              StackScrollTool?.toolName || null,
           },
+
           renderingEngine: null,
         };
 
@@ -197,7 +256,11 @@ export default function CornerstoneViewer({ series }: Props) {
           setFallbackPreviewMode(false);
         }
       } catch (e) {
-        console.warn("Cornerstone indisponible, fallback preview activé.", e);
+        console.error(
+          "Erreur initialisation Cornerstone :",
+          e
+        );
+
         if (mounted) {
           setCornerstoneReady(false);
           setFallbackPreviewMode(true);
@@ -268,33 +331,62 @@ export default function CornerstoneViewer({ series }: Props) {
   }, [activeTool, cornerstoneReady]);
 
   function activateTool(
-    tool: "windowLevel" | "pan" | "zoom" | "length" | "rectangleRoi" | "ellipticalRoi"
+    tool:
+      | "windowLevel"
+      | "pan"
+      | "zoom"
+      | "length"
+      | "rectangleRoi"
+      | "ellipticalRoi"
   ) {
     const runtime = runtimeRef.current;
-    if (!runtime?.toolGroup || !runtime?.csTools) return;
 
-    const { toolGroup, csTools, toolNames } = runtime;
+    if (!runtime?.toolGroup || !runtime?.csTools) {
+      return;
+    }
+
+    const {
+      toolGroup,
+      csTools,
+      toolNames,
+    } = runtime;
+
     const { Enums } = csTools;
-    const mouseBindings = Enums.MouseBindings;
+    const mouseBindings = Enums?.MouseBindings;
 
-    [
+    const toolsToDisable = [
       toolNames.pan,
       toolNames.zoom,
       toolNames.windowLevel,
       toolNames.length,
       toolNames.rectangleRoi,
       toolNames.ellipticalRoi,
-    ].forEach((toolName: string) => {
+    ].filter(Boolean);
+
+    toolsToDisable.forEach((toolName: string) => {
       try {
         toolGroup.setToolPassive(toolName);
       } catch {}
     });
 
-    try {
-      toolGroup.setToolActive(toolNames.stackScrollMouseWheel);
-    } catch {}
+    /*
+    * Scroll dans la série avec la molette.
+    * Seulement si ce tool existe dans la version installée.
+    */
+    if (toolNames.stackScrollMouseWheel) {
+      try {
+        toolGroup.setToolActive(
+          toolNames.stackScrollMouseWheel
+        );
+      } catch (err) {
+        console.warn(
+          "Stack scroll non disponible :",
+          err
+        );
+      }
+    }
 
-    const map: Record<string, string> = {
+    const map: Record<string, string | undefined> = {
       pan: toolNames.pan,
       zoom: toolNames.zoom,
       windowLevel: toolNames.windowLevel,
@@ -303,12 +395,29 @@ export default function CornerstoneViewer({ series }: Props) {
       ellipticalRoi: toolNames.ellipticalRoi,
     };
 
+    const selectedTool = map[tool];
+
+    if (!selectedTool) {
+      console.warn(
+        `Tool Cornerstone indisponible : ${tool}`
+      );
+      return;
+    }
+
     try {
-      toolGroup.setToolActive(map[tool], {
-        bindings: [{ mouseButton: mouseBindings.Primary }],
+      toolGroup.setToolActive(selectedTool, {
+        bindings: [
+          {
+            mouseButton:
+              mouseBindings?.Primary ?? 1,
+          },
+        ],
       });
     } catch (e) {
-      console.error("Tool activation error", e);
+      console.error(
+        "Tool activation error",
+        e
+      );
     }
   }
 

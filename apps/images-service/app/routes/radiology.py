@@ -196,7 +196,10 @@ async def upload_radiology_dicoms(
                 )
             )
             existing = result.scalar_one_or_none()
-            raw_prefix = f"patients/{patient_id}/radiology/raw/"
+            raw_prefix = (
+                f"patients/{patient_id}/radiology/"
+                f"{orthanc_study_id}/{orthanc_series_id}/"
+            )
 
             if existing:
                 existing.preview_instance_id = preview_instance_id
@@ -347,7 +350,7 @@ def list_series_instances(orthanc_series_id: str):
                 "preview_url": f"/api/radiology/instances/{iid}/preview",
                 "file_url": f"/api/radiology/instances/{iid}/file",
                 "metadata_url": f"/api/radiology/instances/{iid}/metadata",
-                "image_id": f"wadouri:{os.getenv('PUBLIC_IMAGES_BASE_URL', '')}/api/radiology/instances/{iid}/file",
+                "image_id": None,
             })
         except Exception:
             items.append({

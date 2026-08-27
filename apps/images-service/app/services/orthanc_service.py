@@ -11,7 +11,7 @@ class OrthancService:
         self.base_url = os.getenv("ORTHANC_URL", "http://orthanc:8042").rstrip("/")
         self.username = os.getenv("ORTHANC_USERNAME", "orthanc")
         self.password = os.getenv("ORTHANC_PASSWORD", "orthanc")
-        self.timeout = float(os.getenv("ORTHANC_TIMEOUT", "3"))
+        self.timeout = float(os.getenv("ORTHANC_TIMEOUT", "10"))
         self.enabled = os.getenv("ORTHANC_ENABLED", "true").lower() == "true"
         self.session: Session = requests.Session()
 

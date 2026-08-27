@@ -80,17 +80,37 @@ def can_access_case(current_user, db_case: CaseDB) -> bool:
         return False
 
     created_by = _normalize_identity(db_case.created_by)
+
     assigned_specialists = {
         _normalize_identity(value)
         for value in (db_case.assigned_specialists or [])
         if value
     }
 
-    # accès si créateur ou spécialiste assigné
-    return (
-        created_by in user_identities
-        or bool(user_identities.intersection(assigned_specialists))
-    )
+    # Accès classique PathoCollab
+    if created_by in user_identities:
+        return True
+
+    if user_identities.intersection(assigned_specialists):
+        return True
+
+    # Accès service externe OncoCollab aux cas créés par intégration
+    external_service_users = {
+        _normalize_identity(value)
+        for value in os.getenv(
+            "EXTERNAL_SERVICE_USERS",
+            "oncocollab-service@hospital.fr"
+        ).split(",")
+        if value.strip()
+    }
+
+    if (
+        created_by in {"external", "oncocollab"}
+        and user_identities.intersection(external_service_users)
+    ):
+        return True
+
+    return False
 
 
 async def _extract_reports_for_case(case_id: str) -> list[dict]:
@@ -471,11 +491,40 @@ async def create_external_case(
     await db.commit()
     await db.refresh(db_case)
 
+    workflow_created = False
+    workflow_data = None
+
+    if payload.specialists_order:
+        try:
+            async with httpx.AsyncClient(timeout=10.0) as client:
+                response = await client.post(
+                    f"{WORKFLOW_SERVICE_URL}/api/workflows/",
+                    json={
+                        "case_id": db_case.id,
+                        "specialists_order": payload.specialists_order,
+                        "workflow_engine": "local"
+                    },
+                )
+
+                response.raise_for_status()
+                workflow_data = response.json()
+                workflow_created = True
+
+        except Exception as exc:
+            logger.exception(
+                "Erreur création workflow pour le cas externe %s: %s",
+                db_case.id,
+                exc,
+            )
+
     return {
         "case_id": db_case.id,
         "patient_id": patient.id,
         "embed_url": f"/embed/case/{db_case.id}",
         "status": "created",
+        "specialists_order": payload.specialists_order,
+        "workflow_created": workflow_created,
+        "workflow": workflow_data,
     }
 
 

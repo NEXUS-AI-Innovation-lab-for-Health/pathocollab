@@ -131,19 +131,23 @@ curl http://localhost:8005/health  # Reports Service
 ```bash
 [ADMIN]
 ID (email) : admin@gmail.com
-PASSWORD : adminadmin
+PASSWORD : admin1234
 
 [ANATOMOPATHOLOGISTE]
-ID (email) : arthur@gmail.com
-PASSWORD : arthur1234
+ID (email) : smith@gmail.com
+PASSWORD : smith1234
 
 [RADIOLOGUE]
+ID (email) : jack@gmail.com
+PASSWORD : jack1234
+
+[ONCOLOGUE]
 ID (email) : louna@gmail.com
 PASSWORD : louna1234
 
-[ONCOLOGUE]
-ID (email) : jack@gmail.com
-PASSWORD : jack1234
+[GENERALISTE]
+ID (email) : alice@gmail.com
+PASSWORD : alice1234
 ```
 
 ---
@@ -208,4 +212,4 @@ Voir [CONTRIBUTING.md](CONTRIBUTING.md)
 
 ## Licence
 
-Projet académique - SAE 6
+PathoCollab - Onco Nexcode 
