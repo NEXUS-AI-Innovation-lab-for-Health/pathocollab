@@ -150,6 +150,14 @@ ID (email) : alice@gmail.com
 PASSWORD : alice1234
 ```
 
+### Ajout d'image dans la base de données :
+```bash 
+[Site officiel de récupération de pathologie]
+https://portal.gdc.cancer.gov/analysis_page?app=Downloads
+[API Upload image wsi à un patient (Quelques minutes)]
+http://localhost:8004/docs#/WSI/upload_and_convert_wsi_api_wsi_upload_and_convert_post
+```
+
 ---
 
 ## Développement
